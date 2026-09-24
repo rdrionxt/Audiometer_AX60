@@ -41,8 +41,11 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+I2S_HandleTypeDef hi2s1;
 SAI_HandleTypeDef hsai_BlockA1;
 SAI_HandleTypeDef hsai_BlockA2;
+UART_HandleTypeDef huart2;
+UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
 int32_t rx_audio_buf[AUDIO_BUFFER_SIZE];
@@ -61,20 +64,132 @@ const float AUDIOMETER_FREQUENCIES_HZ[11] = {
   125.0f, 250.0f, 500.0f, 750.0f, 1000.0f, 1500.0f,
   2000.0f, 3000.0f, 4000.0f, 6000.0f, 8000.0f
 };
+
+/* WebUI UART Circular RX Buffer */
+#define UART_RX_BUF_SIZE 256
+static volatile uint8_t uart_rx_buf[UART_RX_BUF_SIZE];
+static volatile uint16_t uart_rx_head = 0;
+static uint16_t uart_rx_tail = 0;
+
+/* Audiometer Live Operating State (controlled via WebUI) */
+typedef struct {
+  uint8_t freq_idx;          /* 0..10 for 125 Hz to 8000 Hz */
+  int8_t puretone_db;        /* -10 to +120 dB HL */
+  int8_t masking_db;         /* -10 to +120 dB HL */
+  uint8_t ear_sel;           /* 0=LEFT, 1=RIGHT */
+  uint8_t ch1_tone;          /* TONE_MODE_SINE (0) or TONE_MODE_WARBLE (1) */
+  uint8_t ch1_transducer;    /* 0=AC, 1=BC, 2=FF */
+  uint8_t ch2_noise;         /* TONE_MODE_WHITE_NOISE (2) or TONE_MODE_NBN (3) */
+  uint8_t cont_active;       /* 1 = Continuous tone mode (always presenting) */
+  uint8_t pulse_active;      /* 1 = Pulse tone mode enabled */
+  uint8_t stim1_pressed;     /* 1 = Stimulus 1 button pressed */
+  uint8_t stim2_pressed;     /* 1 = Stimulus 2 button pressed */
+  uint8_t talk_over_active;  /* 1 = Talk Over active */
+} WebUI_State_t;
+
+static WebUI_State_t audiometer_state = {
+  .freq_idx = 4,             /* 1000 Hz default */
+  .puretone_db = 90,         /* 90 dB default level */
+  .masking_db = 0,           /* 0 dB default level */
+  .ear_sel = AUDIO_EAR_LEFT, /* LEFT default */
+  .ch1_tone = TONE_MODE_SINE, /* Pure Sine default */
+  .ch1_transducer = 0,       /* AC default */
+  .ch2_noise = TONE_MODE_WHITE_NOISE, /* White Noise default */
+  .cont_active = 0,          /* Standby: Continuous tone OFF on startup */
+  .pulse_active = 0,
+  .stim1_pressed = 0,        /* Muted until WebUI stimulus */
+  .stim2_pressed = 0,        /* Muted until WebUI stimulus */
+  .talk_over_active = 0
+};
+
+static uint8_t last_buttons[3] = {0, 0, 0};
+static uint8_t pga_left_vol = 0;   /* Muted on boot (Standby) */
+static uint8_t pga_right_vol = 0;  /* Muted on boot (Standby) */
+static float stim_env = 0.0f;      /* Silent on boot */
+static float mask_env = 0.0f;      /* Silent on boot */
+static uint32_t pulse_sample_count = 0;
+
+/* Interrupt-Driven Audio Ring Buffer for Glitch-Free Continuous Playback */
+#define AUDIO_RING_SIZE 1024
+static int16_t audio_ring_left[AUDIO_RING_SIZE];
+static int16_t audio_ring_right[AUDIO_RING_SIZE];
+static volatile uint16_t audio_ring_head = 0;
+static volatile uint16_t audio_ring_tail = 0;
+static volatile uint8_t  audio_tx_side = 0; /* 0 = Left, 1 = Right */
+
+static inline uint16_t Audio_Ring_FreeFrames(void)
+{
+  uint16_t head = audio_ring_head;
+  uint16_t tail = audio_ring_tail;
+  uint16_t used = (head >= tail) ? (head - tail) : (uint16_t)(AUDIO_RING_SIZE - (tail - head));
+  return (uint16_t)(AUDIO_RING_SIZE - 1U - used);
+}
+
+static inline void Audio_Ring_WriteFrame(int16_t left, int16_t right)
+{
+  uint16_t head = audio_ring_head;
+  audio_ring_left[head] = left;
+  audio_ring_right[head] = right;
+  audio_ring_head = (uint16_t)((head + 1U) % AUDIO_RING_SIZE);
+}
+
+/**
+  * @brief  SPI1 / I2S1 Hardware TXE Interrupt Service Routine.
+  *         Transmits Left and Right samples directly from ring buffer with zero latency.
+  */
+void Audio_I2S_ISR_Handler(void)
+{
+  if (SPI1->SR & SPI_SR_TXE)
+  {
+    uint16_t tail = audio_ring_tail;
+    uint16_t head = audio_ring_head;
+
+    if (audio_tx_side == 0)
+    {
+      /* Channel Left (LRCK = LOW) */
+      if (tail != head)
+      {
+        SPI1->DR = (uint16_t)audio_ring_left[tail];
+      }
+      else
+      {
+        SPI1->DR = 0; /* Underflow */
+      }
+      audio_tx_side = 1;
+    }
+    else
+    {
+      /* Channel Right (LRCK = HIGH) */
+      if (tail != head)
+      {
+        SPI1->DR = (uint16_t)audio_ring_right[tail];
+        audio_ring_tail = (uint16_t)((tail + 1U) % AUDIO_RING_SIZE);
+      }
+      else
+      {
+        SPI1->DR = 0; /* Underflow */
+      }
+      audio_tx_side = 0;
+    }
+  }
+}
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 void PeriphCommonClock_Config(void);
 static void MX_GPIO_Init(void);
+void MX_I2S1_Init(void);
 void MX_SAI1_Init(void);
 void MX_SAI2_Init(void);
+void MX_USART2_UART_Init(void);
+void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
+void WebUI_UpdateAudioSettings(void);
+void WebUI_Poll(void);
+static uint8_t DbToPGA2311(int8_t db);
+static void Uart_Send_Response(const uint8_t *data, uint16_t len);
 /* USER CODE END PFP */
-
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
 
 /* USER CODE END 0 */
 
@@ -109,114 +224,123 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_I2S1_Init();
   MX_SAI1_Init();
   MX_SAI2_Init();
+  MX_USART2_UART_Init();
+  MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
 
   /* 1. Turn on ALL transducers & outputs (AC Left/Right, Insert Earphone, Bone Conductor, Free Field) */
-  HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin | INSERT_EP_EN_Pin | BC_EN_Pin | BC_L_R_EN_Pin | FF_EN_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOE, BC_EN_Pin | WN_EN_Pin | FF_EN_Pin | BC_L_R_EN_Pin | INSERT_EP_EN_Pin | AC_Left_EN_Pin | AC_Right_EN_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(INTERNAL_SPK_EN_GPIO_Port, INTERNAL_SPK_EN_Pin, GPIO_PIN_SET);
 
-  /* 2. Turn on Stimulus presentation switches (PA6, PB16) */
-  HAL_GPIO_WritePin(STIMULUS1_GPIO_Port, STIMULUS1_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(STIMULUS2_GPIO_Port, STIMULUS2_Pin, GPIO_PIN_SET);
 
-  /* 3. Enable OPA headphone amplifier */
+
+  /* 3. Enable OPA headphone amplifier (PB2) */
   HAL_GPIO_WritePin(OPA_EN_GPIO_Port, OPA_EN_Pin, GPIO_PIN_SET);
 
   /* 4. Select PCM DAC mode (PA9 = LOW) */
   HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
 
-  /* 5. Un-mute PGA2311 (PB13 = HIGH) and disable Zero-Cross delay (PB14 = LOW for instant update) */
+  /* 5. Hardware reset & unmute sequence for PGA2311 (PB13 = MUTE, PB14 = ZCEN) */
+  HAL_GPIO_WritePin(PGA_MUTE_1_GPIO_Port, PGA_MUTE_1_Pin, GPIO_PIN_RESET);
+  HAL_Delay(50);
   HAL_GPIO_WritePin(PGA_MUTE_1_GPIO_Port, PGA_MUTE_1_Pin, GPIO_PIN_SET);
+  HAL_Delay(50);
   HAL_GPIO_WritePin(ZCEN_GPIO_Port, ZCEN_Pin, GPIO_PIN_RESET);
 
-  /* 6. Set volume of PGA2311 (code 200 = ~ +4 dB clean audible volume) */
-  PGA2311_SetVolume(200, 200);
+  /* 6. Configure initial audio state and PGA2311 volume (1000 Hz, 90 dB HL) */
+  WebUI_UpdateAudioSettings();
+
+  /* 7. Enable Hardware I2S1 Master Transmitter and TXE interrupt */
+  __HAL_I2S_ENABLE(&hi2s1);
+  __HAL_I2S_ENABLE_IT(&hi2s1, I2S_IT_TXE);
 
   /* USER CODE END 2 */
 
-  /* Configure PCM5102 DAC Audio Pins as High-Speed Outputs:
-   * PD11 = LRCK (Frame Sync)
-   * PD12 = DIN  (Serial Audio Data)
-   * PE5  = BCK  (Bit Clock)
-   * PE2  = MCLK (Master Clock)
-   */
-  GPIO_InitTypeDef GPIO_DAC_InitStruct = {0};
-  __HAL_RCC_GPIOE_CLK_ENABLE();
-  __HAL_RCC_GPIOD_CLK_ENABLE();
-
-  GPIO_DAC_InitStruct.Pin = GPIO_PIN_2 | GPIO_PIN_5;
-  GPIO_DAC_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_DAC_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_DAC_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(GPIOE, &GPIO_DAC_InitStruct);
-
-  GPIO_DAC_InitStruct.Pin = GPIO_PIN_11 | GPIO_PIN_12;
-  GPIO_DAC_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_DAC_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_DAC_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(GPIOD, &GPIO_DAC_InitStruct);
-
-  /* Set initial pin states: LRCK High (idle), BCK Low */
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_11, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_RESET);
-
-  /* Infinite loop - Direct High-Precision 48 kHz / 1 kHz Sine I2S Engine */
+  /* Infinite loop - Hardware I2S1 Real-Time Audio Engine & WebUI Control */
   /* USER CODE BEGIN WHILE */
-  Audio_Channel_Init(&ch_stim, TONE_MODE_SINE, 1000.0f, 123456789);
-
   while (1)
   {
-    /* Generate 1000 Hz Sine Sample (16-bit MSB-aligned in 32-bit slot) */
-    int16_t sample = (int16_t)(Audio_Process_Channel(&ch_stim) * 0.8f);
-    uint32_t data_word = (uint32_t)(((uint32_t)sample) << 16);
+    /* 1. Poll UART for WebUI commands and PB3 patient switch */
+    WebUI_Poll();
 
-    /* =========================================================================
-     * LEFT CHANNEL: LRCK (PD11) = LOW
-     * Standard I2S: 32 bits, MSB first, 1-bit delay
-     * ========================================================================= */
-    /* Bit 0: LRCK transitions to LOW 1 bit before MSB */
-    GPIOD->BSRR = (uint32_t)GPIO_PIN_11 << 16U; /* LRCK LOW */
-    if (data_word & (1UL << 31)) GPIOD->BSRR = GPIO_PIN_12; else GPIOD->BSRR = (uint32_t)GPIO_PIN_12 << 16U;
-    for (volatile int d = 0; d < 8; d++) __NOP();
-    GPIOE->BSRR = GPIO_PIN_5; /* BCK HIGH */
-    for (volatile int d = 0; d < 8; d++) __NOP();
-    GPIOE->BSRR = (uint32_t)GPIO_PIN_5 << 16U; /* BCK LOW */
+    /* 2. Determine target digital envelopes */
+    uint8_t stim_active = (audiometer_state.cont_active || audiometer_state.stim1_pressed);
+    uint8_t mask_active = ((audiometer_state.masking_db > -10) && (audiometer_state.cont_active || audiometer_state.stim2_pressed));
 
-    /* Bits 1 to 31 */
-    for (int8_t b = 30; b >= 0; b--)
+    float target_stim = stim_active ? 0.8f : 0.0f;
+    float target_mask = mask_active ? 0.8f : 0.0f;
+
+    /* Handle pulse modulation if pulse mode is enabled */
+    if (audiometer_state.pulse_active && stim_active)
     {
-      if (data_word & (1UL << b)) GPIOD->BSRR = GPIO_PIN_12; else GPIOD->BSRR = (uint32_t)GPIO_PIN_12 << 16U;
-      for (volatile int d = 0; d < 8; d++) __NOP();
-      GPIOE->BSRR = GPIO_PIN_5; /* BCK HIGH */
-      for (volatile int d = 0; d < 8; d++) __NOP();
-      GPIOE->BSRR = (uint32_t)GPIO_PIN_5 << 16U; /* BCK LOW */
+      if (pulse_sample_count >= 19200) /* 400 ms period at 48 kHz */
+      {
+        pulse_sample_count = 0;
+      }
+      if (pulse_sample_count >= 9600)  /* 200 ms OFF, 200 ms ON */
+      {
+        target_stim = 0.0f;
+      }
+      pulse_sample_count += 64;
     }
 
-    /* =========================================================================
-     * RIGHT CHANNEL: LRCK (PD11) = HIGH
-     * Standard I2S: 32 bits, MSB first, 1-bit delay
-     * ========================================================================= */
-    /* Bit 0: LRCK transitions to HIGH 1 bit before MSB */
-    GPIOD->BSRR = GPIO_PIN_11; /* LRCK HIGH */
-    if (data_word & (1UL << 31)) GPIOD->BSRR = GPIO_PIN_12; else GPIOD->BSRR = (uint32_t)GPIO_PIN_12 << 16U;
-    for (volatile int d = 0; d < 8; d++) __NOP();
-    GPIOE->BSRR = GPIO_PIN_5; /* BCK HIGH */
-    for (volatile int d = 0; d < 8; d++) __NOP();
-    GPIOE->BSRR = (uint32_t)GPIO_PIN_5 << 16U; /* BCK LOW */
+    /* 3. Keep audio ring buffer populated (up to 64 frames per iteration) */
+    uint16_t free_frames = Audio_Ring_FreeFrames();
+    uint16_t to_gen = (free_frames >= 64) ? 64 : free_frames;
 
-    /* Bits 1 to 31 */
-    for (int8_t b = 30; b >= 0; b--)
+    for (uint16_t i = 0; i < to_gen; i++)
     {
-      if (data_word & (1UL << b)) GPIOD->BSRR = GPIO_PIN_12; else GPIOD->BSRR = (uint32_t)GPIO_PIN_12 << 16U;
-      for (volatile int d = 0; d < 8; d++) __NOP();
-      GPIOE->BSRR = GPIO_PIN_5; /* BCK HIGH */
-      for (volatile int d = 0; d < 8; d++) __NOP();
-      GPIOE->BSRR = (uint32_t)GPIO_PIN_5 << 16U; /* BCK LOW */
+      /* Smooth 10 ms digital envelope ramping */
+      if (stim_env < target_stim)
+      {
+        stim_env += 0.002f;
+        if (stim_env > target_stim) stim_env = target_stim;
+      }
+      else if (stim_env > target_stim)
+      {
+        stim_env -= 0.002f;
+        if (stim_env < target_stim) stim_env = target_stim;
+      }
+
+      if (mask_env < target_mask)
+      {
+        mask_env += 0.002f;
+        if (mask_env > target_mask) mask_env = target_mask;
+      }
+      else if (mask_env > target_mask)
+      {
+        mask_env -= 0.002f;
+        if (mask_env < target_mask) mask_env = target_mask;
+      }
+
+      int16_t sample_stim = (stim_env > 0.0001f) ? Audio_Process_Channel(&ch_stim) : 0;
+      int16_t sample_mask = (mask_env > 0.0001f) ? Audio_Process_Channel(&ch_mask) : 0;
+
+      int16_t out_stim = (int16_t)((float)sample_stim * stim_env);
+      int16_t out_mask = (int16_t)((float)sample_mask * mask_env);
+
+      int16_t left_out = 0;
+      int16_t right_out = 0;
+
+      if (audiometer_state.ear_sel == AUDIO_EAR_LEFT)
+      {
+        /* CH1 (Stimulus: Puretone/Warble) -> Left, CH2 (Masking: Noise) -> Right */
+        left_out  = out_stim;
+        right_out = out_mask;
+      }
+      else /* AUDIO_EAR_RIGHT */
+      {
+        /* CH1 (Stimulus: Puretone/Warble) -> Right, CH2 (Masking: Noise) -> Left */
+        left_out  = out_mask;
+        right_out = out_stim;
+      }
+
+      Audio_Ring_WriteFrame(left_out, right_out);
     }
   }
-  /* USER CODE END 3 */
   /* USER CODE END 3 */
 }
 
@@ -301,17 +425,19 @@ void PeriphCommonClock_Config(void)
 {
   RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
 
-  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_SAI1 | RCC_PERIPHCLK_SAI2;
+  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_SAI1 | RCC_PERIPHCLK_SAI2 | RCC_PERIPHCLK_I2S_APB2;
 
-  /* If running on HSI (16MHz), PLLSAIM = 16 (16MHz / 16 = 1MHz VCO input)
-   * If running on HSE (8MHz),  PLLSAIM = 8  (8MHz / 8 = 1MHz VCO input) */
+  /* If running on HSI (16MHz), PLLSAIM/PLLI2SM = 16 (16MHz / 16 = 1MHz VCO input)
+   * If running on HSE (8MHz),  PLLSAIM/PLLI2SM = 8  (8MHz / 8 = 1MHz VCO input) */
   if ((RCC->PLLCFGR & RCC_PLLCFGR_PLLSRC) == RCC_PLLCFGR_PLLSRC_HSI)
   {
     PeriphClkInitStruct.PLLSAI.PLLSAIM = 16;
+    PeriphClkInitStruct.PLLI2S.PLLI2SM = 16;
   }
   else
   {
     PeriphClkInitStruct.PLLSAI.PLLSAIM = 8;
+    PeriphClkInitStruct.PLLI2S.PLLI2SM = 8;
   }
 
   PeriphClkInitStruct.PLLSAI.PLLSAIN = 192;
@@ -321,8 +447,38 @@ void PeriphCommonClock_Config(void)
   PeriphClkInitStruct.Sai1ClockSelection = RCC_SAI1CLKSOURCE_PLLSAI;
   PeriphClkInitStruct.Sai2ClockSelection = RCC_SAI2CLKSOURCE_PLLSAI;
 
-  /* Configure SAI1 & SAI2 peripheral clock */
+  /* Configure PLLI2S for Hardware I2S1 (APB2): 192 MHz VCO / 2 = 96 MHz I2S_CLK */
+  PeriphClkInitStruct.PLLI2S.PLLI2SN = 192;
+  PeriphClkInitStruct.PLLI2S.PLLI2SP = RCC_PLLI2SP_DIV2;
+  PeriphClkInitStruct.PLLI2S.PLLI2SR = 2;
+  PeriphClkInitStruct.PLLI2S.PLLI2SQ = 2;
+  PeriphClkInitStruct.PLLI2SDivQ = 1;
+  PeriphClkInitStruct.I2sApb2ClockSelection = RCC_I2SAPB2CLKSOURCE_PLLI2S;
+
+  /* Configure SAI & I2S peripheral clocks */
   HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct);
+}
+
+/**
+  * @brief I2S1 Initialization Function (Configured for PCM5102A Stereo DAC on PA4, PA5, PA7)
+  * @param None
+  * @retval None
+  */
+void MX_I2S1_Init(void)
+{
+  hi2s1.Instance = SPI1;
+  hi2s1.Init.Mode = I2S_MODE_MASTER_TX;
+  hi2s1.Init.Standard = I2S_STANDARD_PHILIPS;
+  hi2s1.Init.DataFormat = I2S_DATAFORMAT_16B;
+  hi2s1.Init.MCLKOutput = I2S_MCLKOUTPUT_DISABLE;
+  hi2s1.Init.AudioFreq = I2S_AUDIOFREQ_48K;
+  hi2s1.Init.CPOL = I2S_CPOL_LOW;
+  hi2s1.Init.ClockSource = I2S_CLOCK_PLL;
+  hi2s1.Init.FullDuplexMode = I2S_FULLDUPLEXMODE_DISABLE;
+  if (HAL_I2S_Init(&hi2s1) != HAL_OK)
+  {
+    Error_Handler();
+  }
 }
 
 /**
@@ -521,6 +677,376 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+  * @brief USART2 Initialization Function (Configured for CH340G USB UART at 115200 8N1)
+  * @param None
+  * @retval None
+  */
+void MX_USART2_UART_Init(void)
+{
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* Enable RXNE interrupt */
+  __HAL_UART_ENABLE_IT(&huart2, UART_IT_RXNE);
+}
+
+/**
+  * @brief USART3 Initialization Function (Configured for CH340G USB UART on PD8/PC5 at 115200 8N1)
+  * @param None
+  * @retval None
+  */
+void MX_USART3_UART_Init(void)
+{
+  huart3.Instance = USART3;
+  huart3.Init.BaudRate = 115200;
+  huart3.Init.WordLength = UART_WORDLENGTH_8B;
+  huart3.Init.StopBits = UART_STOPBITS_1;
+  huart3.Init.Parity = UART_PARITY_NONE;
+  huart3.Init.Mode = UART_MODE_TX_RX;
+  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* Enable RXNE interrupt */
+  __HAL_UART_ENABLE_IT(&huart3, UART_IT_RXNE);
+}
+
+/**
+  * @brief  Transmits response frame out to both USART2 and USART3.
+  */
+static void Uart_Send_Response(const uint8_t *data, uint16_t len)
+{
+  for (uint16_t i = 0; i < len; i++)
+  {
+    /* Send to USART2 */
+    uint32_t to2 = 5000;
+    while (!(huart2.Instance->SR & USART_SR_TXE) && --to2);
+    huart2.Instance->DR = data[i];
+
+    /* Send to USART3 */
+    uint32_t to3 = 5000;
+    while (!(huart3.Instance->SR & USART_SR_TXE) && --to3);
+    huart3.Instance->DR = data[i];
+  }
+}
+
+/**
+  * @brief  Pushes a received byte from USART ISR into the ring buffer.
+  * @param  byte: Received character
+  */
+void WebUI_UartRxByte(uint8_t byte)
+{
+  uint16_t next = (uart_rx_head + 1) % UART_RX_BUF_SIZE;
+  if (next != uart_rx_tail)
+  {
+    uart_rx_buf[uart_rx_head] = byte;
+    uart_rx_head = next;
+  }
+}
+
+/**
+  * @brief  Maps clinical hearing level (dB HL) to PGA2311 hardware gain code (0..255).
+  *         PGA2311 operates at 0.5 dB per step (2 steps per dB).
+  *         Calibrated: 90 dB HL -> Code 220 (verified clear audible baseline).
+  * @param  db: Attenuation / Level in dB HL (-10 dB to +120 dB)
+  * @retval uint8_t PGA2311 code (0 = MUTE, 1..255)
+  */
+static uint8_t DbToPGA2311(int8_t db)
+{
+  if (db <= -10)
+  {
+    return 10;
+  }
+  int32_t code = 220 - 2 * (90 - (int32_t)db);
+  if (code > 255) code = 255;
+  if (code < 1) code = 1;
+  return (uint8_t)code;
+}
+
+/**
+  * @brief  Controls physical hardware relays and analog switches for transducers
+  *         PE13/PE14: AC Left/Right
+  *         PE7/PE10:  BC Enable / BC Left-Right steering
+  *         PE12:      Insert Earphone (masking during BC)
+  *         PE9:       Free Field loudspeaker
+  */
+static void Hardware_Update_Audio_Path(uint8_t transducer, uint8_t ear)
+{
+  /* Always ensure OPA headphone amplifier is enabled */
+  HAL_GPIO_WritePin(OPA_EN_GPIO_Port, OPA_EN_Pin, GPIO_PIN_SET);
+
+  if (transducer == 0) /* AC (Air Conduction Headphones) */
+  {
+    /* Enable AC Left and AC Right (one ear stimulus, opposite ear masking) */
+    HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin, GPIO_PIN_SET);
+
+    /* Disable BC, Insert, FreeField */
+    HAL_GPIO_WritePin(GPIOE, BC_EN_Pin | BC_L_R_EN_Pin | INSERT_EP_EN_Pin | FF_EN_Pin, GPIO_PIN_RESET);
+  }
+  else if (transducer == 1) /* BC (Bone Conduction + Insert Earphone Masking) */
+  {
+    /* Disable AC and FF */
+    HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin | FF_EN_Pin, GPIO_PIN_RESET);
+
+    /* Enable Bone Conductor */
+    HAL_GPIO_WritePin(GPIOE, BC_EN_Pin, GPIO_PIN_SET);
+
+    /* Steer Bone Conductor to test ear */
+    if (ear == AUDIO_EAR_RIGHT)
+    {
+      HAL_GPIO_WritePin(GPIOE, BC_L_R_EN_Pin, GPIO_PIN_SET);
+    }
+    else
+    {
+      HAL_GPIO_WritePin(GPIOE, BC_L_R_EN_Pin, GPIO_PIN_RESET);
+    }
+
+    /* Enable Insert Earphone on non-test ear for masking */
+    HAL_GPIO_WritePin(GPIOE, INSERT_EP_EN_Pin, GPIO_PIN_SET);
+  }
+  else if (transducer == 2) /* FF (Free Field Loudspeakers) */
+  {
+    /* Enable Free Field output */
+    HAL_GPIO_WritePin(GPIOE, FF_EN_Pin, GPIO_PIN_SET);
+
+    /* Disable AC, BC, Insert */
+    HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin | BC_EN_Pin | BC_L_R_EN_Pin | INSERT_EP_EN_Pin, GPIO_PIN_RESET);
+  }
+}
+
+/**
+  * @brief  Applies current audiometer state to the DSP channel generators and PGA2311 volume.
+  */
+void WebUI_UpdateAudioSettings(void)
+{
+  static float last_stim_freq = -1.0f;
+  static int last_stim_mode = -1;
+  static float last_mask_freq = -1.0f;
+  static int last_mask_mode = -1;
+
+  if (audiometer_state.freq_idx > 10) audiometer_state.freq_idx = 4;
+  float target_freq = AUDIOMETER_FREQUENCIES_HZ[audiometer_state.freq_idx];
+
+  /* 1. Re-initialize CH1 DSP channel (Pure Sine or Warble) if frequency or mode changed */
+  if (target_freq != last_stim_freq || (int)audiometer_state.ch1_tone != last_stim_mode)
+  {
+    last_stim_freq = target_freq;
+    last_stim_mode = (int)audiometer_state.ch1_tone;
+    Audio_Channel_Init(&ch_stim, (int)audiometer_state.ch1_tone, target_freq, 123456789);
+  }
+
+  /* 2. Re-initialize CH2 DSP channel (White Noise or NBN) if frequency or mode changed */
+  if (target_freq != last_mask_freq || (int)audiometer_state.ch2_noise != last_mask_mode)
+  {
+    last_mask_freq = target_freq;
+    last_mask_mode = (int)audiometer_state.ch2_noise;
+    Audio_Channel_Init(&ch_mask, (int)audiometer_state.ch2_noise, target_freq, 987654321);
+  }
+
+  /* 3. Determine presentation status */
+  uint8_t stim_presenting = (audiometer_state.cont_active || audiometer_state.stim1_pressed);
+  uint8_t mask_presenting = ((audiometer_state.masking_db > -10) && (audiometer_state.cont_active || audiometer_state.stim2_pressed));
+
+  uint8_t stim_pga = stim_presenting ? DbToPGA2311(audiometer_state.puretone_db) : 0;
+  uint8_t mask_pga = mask_presenting ? DbToPGA2311(audiometer_state.masking_db) : 0;
+
+  uint8_t new_left = 0, new_right = 0;
+  if (audiometer_state.ear_sel == AUDIO_EAR_LEFT)
+  {
+    new_left  = stim_pga;
+    new_right = mask_pga;
+  }
+  else /* AUDIO_EAR_RIGHT */
+  {
+    new_left  = mask_pga;
+    new_right = stim_pga;
+  }
+
+  static uint8_t cur_pga_l = 0xFF;
+  static uint8_t cur_pga_r = 0xFF;
+  if (new_left != cur_pga_l || new_right != cur_pga_r)
+  {
+    cur_pga_l = new_left;
+    cur_pga_r = new_right;
+    pga_left_vol = new_left;
+    pga_right_vol = new_right;
+    PGA2311_SetVolume(new_left, new_right);
+  }
+
+  /* 4. Switch physical transducer relays based on selected OUT and Ear */
+  Hardware_Update_Audio_Path(audiometer_state.ch1_transducer, audiometer_state.ear_sel);
+}
+
+/**
+  * @brief  Polls for patient response switch events on PB3 and decodes incoming WebUI serial packets.
+  */
+void WebUI_Poll(void)
+{
+  /* 1. Poll Patient Response Switch on PB3 */
+  static GPIO_PinState last_sw_state = GPIO_PIN_SET;
+  GPIO_PinState sw = HAL_GPIO_ReadPin(PAT_RESPONSE_SW_GPIO_Port, PAT_RESPONSE_SW_Pin);
+  if (sw != last_sw_state)
+  {
+    last_sw_state = sw;
+    uint8_t resp = (sw == GPIO_PIN_RESET) ? 0x01 : 0x00; /* Active low (pull-up) */
+    uint8_t frame[4] = { 0xAA, 0x50, resp, 0x55 };
+    Uart_Send_Response(frame, 4);
+  }
+
+  /* 2. Process incoming serial bytes from rx_ring_buffer */
+  while (1)
+  {
+    uint16_t count = (uart_rx_head >= uart_rx_tail) ?
+                     (uart_rx_head - uart_rx_tail) :
+                     (UART_RX_BUF_SIZE - uart_rx_tail + uart_rx_head);
+
+    if (count < 8) break; /* Minimum frame size is 8 bytes */
+
+    /* Align to header 0xAA */
+    if (uart_rx_buf[uart_rx_tail] != 0xAA)
+    {
+      uart_rx_tail = (uart_rx_tail + 1) % UART_RX_BUF_SIZE;
+      continue;
+    }
+
+    /* Check for 11-byte frame first */
+    if (count >= 11)
+    {
+      uint8_t temp[11];
+      for (uint8_t i = 0; i < 11; i++)
+      {
+        temp[i] = uart_rx_buf[(uart_rx_tail + i) % UART_RX_BUF_SIZE];
+      }
+
+      if (temp[10] == 0x55)
+      {
+        uint8_t csum = temp[1] ^ temp[2] ^ temp[3] ^ temp[4] ^ temp[5] ^ temp[6] ^ temp[7] ^ temp[8];
+        if (csum == temp[9])
+        {
+          /* Valid 11-byte packet */
+          uart_rx_tail = (uart_rx_tail + 11) % UART_RX_BUF_SIZE;
+
+          uint8_t b0 = temp[1];
+          uint8_t b1 = temp[2];
+          uint8_t b2 = temp[3];
+          audiometer_state.puretone_db = (int8_t)temp[4];
+          audiometer_state.masking_db = (int8_t)temp[5];
+          audiometer_state.freq_idx = (temp[6] <= 10) ? temp[6] : 4;
+          audiometer_state.ear_sel = (temp[7] == 0) ? AUDIO_EAR_LEFT : AUDIO_EAR_RIGHT;
+
+          /* Config byte: Bit 0 = CH1 Tone, Bits 1..2 = CH1 Transducer, Bit 3 = CH2 Noise */
+          uint8_t cfg = temp[8];
+          audiometer_state.ch1_tone       = (cfg & 0x01) ? TONE_MODE_WARBLE : TONE_MODE_SINE;
+          audiometer_state.ch1_transducer = (cfg >> 1) & 0x03; /* 0=AC, 1=BC, 2=FF */
+          audiometer_state.ch2_noise      = (cfg & (1 << 3)) ? TONE_MODE_NBN : TONE_MODE_WHITE_NOISE;
+
+          audiometer_state.stim1_pressed = (b0 & (1 << 2)) ? 1 : 0;
+          audiometer_state.stim2_pressed = (b0 & (1 << 3)) ? 1 : 0;
+          audiometer_state.cont_active   = (b1 & (1 << 2)) ? 1 : 0;
+          audiometer_state.pulse_active  = (b1 & (1 << 1)) ? 1 : 0;
+          audiometer_state.talk_over_active = (b2 & (1 << 4)) ? 1 : 0;
+
+          last_buttons[0] = b0;
+          last_buttons[1] = b1;
+          last_buttons[2] = b2;
+
+          WebUI_UpdateAudioSettings();
+
+          /* Send ACK frame */
+          uint8_t ack[4] = { 0xAA, 0x06, 0x01, 0x55 };
+          Uart_Send_Response(ack, 4);
+          continue;
+        }
+      }
+    }
+
+    /* Fallback: Check for 8-byte frame */
+    if (count >= 8)
+    {
+      uint8_t temp[8];
+      for (uint8_t i = 0; i < 8; i++)
+      {
+        temp[i] = uart_rx_buf[(uart_rx_tail + i) % UART_RX_BUF_SIZE];
+      }
+
+      if (temp[7] == 0x55)
+      {
+        uint8_t csum = temp[1] ^ temp[2] ^ temp[3] ^ temp[4] ^ temp[5];
+        if (csum == temp[6])
+        {
+          /* Valid 8-byte packet */
+          uart_rx_tail = (uart_rx_tail + 8) % UART_RX_BUF_SIZE;
+
+          uint8_t b0 = temp[1];
+          uint8_t b1 = temp[2];
+          uint8_t b2 = temp[3];
+          audiometer_state.puretone_db = (int8_t)temp[4];
+          audiometer_state.masking_db = (int8_t)temp[5];
+
+          /* Rising edge detection for button transitions */
+          if ((b0 & 0x01) && !(last_buttons[0] & 0x01)) /* Freq Down */
+          {
+            if (audiometer_state.freq_idx > 0) audiometer_state.freq_idx--;
+          }
+          if ((b0 & 0x02) && !(last_buttons[0] & 0x02)) /* Freq Up */
+          {
+            if (audiometer_state.freq_idx < 10) audiometer_state.freq_idx++;
+          }
+          if ((b0 & 0x10) && !(last_buttons[0] & 0x10)) /* Ear Toggle */
+          {
+            audiometer_state.ear_sel = (audiometer_state.ear_sel == AUDIO_EAR_LEFT) ? AUDIO_EAR_RIGHT : AUDIO_EAR_LEFT;
+          }
+          if ((b1 & 0x40) && !(last_buttons[1] & 0x40)) /* Tone Mode Toggle */
+          {
+            audiometer_state.ch1_tone = (audiometer_state.ch1_tone == TONE_MODE_SINE) ? TONE_MODE_WARBLE : TONE_MODE_SINE;
+          }
+
+          audiometer_state.stim1_pressed = (b0 & (1 << 2)) ? 1 : 0;
+          audiometer_state.stim2_pressed = (b0 & (1 << 3)) ? 1 : 0;
+          audiometer_state.cont_active   = (b1 & (1 << 2)) ? 1 : 0;
+          audiometer_state.pulse_active  = (b1 & (1 << 1)) ? 1 : 0;
+          audiometer_state.talk_over_active = (b2 & (1 << 4)) ? 1 : 0;
+
+          last_buttons[0] = b0;
+          last_buttons[1] = b1;
+          last_buttons[2] = b2;
+
+          WebUI_UpdateAudioSettings();
+
+          /* Send ACK frame */
+          uint8_t ack[4] = { 0xAA, 0x06, 0x01, 0x55 };
+          Uart_Send_Response(ack, 4);
+          continue;
+        }
+      }
+    }
+
+    /* CRITICAL FIX: If count < 11 and byte 7 was NOT 0x55, this 0xAA is likely
+     * the start of an 11-byte frame currently in flight over UART.
+     * DO NOT discard 0xAA! Wait for the remaining bytes to arrive! */
+    if (count < 11)
+    {
+      break;
+    }
+
+    /* Advance by 1 byte to keep searching for valid header */
+    uart_rx_tail = (uart_rx_tail + 1) % UART_RX_BUF_SIZE;
+  }
+}
+
 
 /**
   * @brief  Selects active microphone source by controlling hardware switch (PD10)
@@ -819,35 +1345,100 @@ int16_t Audio_Process_Channel(ChannelState *ch)
   * @param  out_left: Output pointer for Left channel sample
   * @param  out_right: Output pointer for Right channel sample
   */
-void Audio_Generate_Sample_Pair_SAI(ChannelState *ch_stim, ChannelState *ch_mask,
-                                    float stim_env, float mask_env, uint8_t active_ear,
-                                    int16_t *out_left, int16_t *out_right)
+/**
+  * @brief  Generates and plays a stereo sine wave tone with configurable frequencies,
+  *         duration, and volume via the Hardware I2S1 PCM5102 DAC.
+  * @param  freq_left_hz: Frequency of left channel sine wave in Hz
+  * @param  freq_right_hz: Frequency of right channel sine wave in Hz
+  * @param  duration_ms: Duration of playback in milliseconds
+  * @param  volume_left: Left channel volume (0.0f to 1.0f)
+  * @param  volume_right: Right channel volume (0.0f to 1.0f)
+  * @retval HAL_StatusTypeDef
+  */
+HAL_StatusTypeDef Play_SineWave_I2S(float freq_left_hz, float freq_right_hz, uint32_t duration_ms, float volume_left, float volume_right)
 {
-  int16_t sample_stim = (ch_stim != NULL) ? Audio_Process_Channel(ch_stim) : 0;
-  int16_t sample_mask = (ch_mask != NULL) ? Audio_Process_Channel(ch_mask) : 0;
+  if (duration_ms == 0 || (volume_left <= 0.0f && volume_right <= 0.0f))
+  {
+    return HAL_OK;
+  }
+  if (volume_left > 1.0f) volume_left = 1.0f;
+  if (volume_right > 1.0f) volume_right = 1.0f;
 
-  if (active_ear == AUDIO_EAR_LEFT)
+  uint32_t sample_rate = (uint32_t)AUDIO_SAMPLE_RATE_HZ;
+  uint32_t phase_step_left  = (uint32_t)((freq_left_hz * 4294967296.0f) / (float)sample_rate);
+  uint32_t phase_step_right = (uint32_t)((freq_right_hz * 4294967296.0f) / (float)sample_rate);
+  static uint32_t phase_acc_left = 0;
+  static uint32_t phase_acc_right = 0;
+
+  uint32_t total_samples = (sample_rate * duration_ms) / 1000;
+  uint32_t fade_samples = (sample_rate * 10) / 1000; /* 10 ms anti-pop envelope */
+  if (fade_samples > total_samples / 2) fade_samples = total_samples / 2;
+
+  uint32_t vol_base_left  = (uint32_t)(volume_left * 32768.0f);
+  uint32_t vol_base_right = (uint32_t)(volume_right * 32768.0f);
+
+  if ((hi2s1.Instance->I2SCFGR & SPI_I2SCFGR_I2SE) != SPI_I2SCFGR_I2SE)
   {
-    /* Left Ear = Stimulus, Right Ear = Contralateral Masking */
-    *out_left  = (int16_t)((float)sample_stim * stim_env);
-    *out_right = (int16_t)((float)sample_mask * mask_env);
+    __HAL_I2S_ENABLE(&hi2s1);
   }
-  else if (active_ear == AUDIO_EAR_RIGHT)
+
+  uint32_t timeout_limit = 100000;
+
+  for (uint32_t i = 0; i < total_samples; i++)
   {
-    /* Right Ear = Stimulus, Left Ear = Contralateral Masking */
-    *out_left  = (int16_t)((float)sample_mask * mask_env);
-    *out_right = (int16_t)((float)sample_stim * stim_env);
+    uint32_t vol_q15_left;
+    uint32_t vol_q15_right;
+
+    if (i < fade_samples)
+    {
+      vol_q15_left  = (vol_base_left * i) / fade_samples;
+      vol_q15_right = (vol_base_right * i) / fade_samples;
+    }
+    else if (i > (total_samples - fade_samples))
+    {
+      vol_q15_left  = (vol_base_left * (total_samples - i)) / fade_samples;
+      vol_q15_right = (vol_base_right * (total_samples - i)) / fade_samples;
+    }
+    else
+    {
+      vol_q15_left  = vol_base_left;
+      vol_q15_right = vol_base_right;
+    }
+
+    phase_acc_left  += phase_step_left;
+    phase_acc_right += phase_step_right;
+
+    uint8_t idx_l = (uint8_t)(phase_acc_left >> 24);
+    uint8_t idx_r = (uint8_t)(phase_acc_right >> 24);
+
+    int32_t val_l = (int32_t)SINE_LUT[idx_l];
+    int32_t val_r = (int32_t)SINE_LUT[idx_r];
+
+    int16_t sample_l = (int16_t)((val_l * (int32_t)vol_q15_left) >> 15);
+    int16_t sample_r = (int16_t)((val_r * (int32_t)vol_q15_right) >> 15);
+
+    /* Transmit Left Channel (LRCK = LOW) */
+    uint32_t timeout = timeout_limit;
+    while (__HAL_I2S_GET_FLAG(&hi2s1, I2S_FLAG_TXE) == RESET)
+    {
+      if (--timeout == 0) return HAL_TIMEOUT;
+    }
+    hi2s1.Instance->DR = (uint16_t)sample_l;
+
+    /* Transmit Right Channel (LRCK = HIGH) */
+    timeout = timeout_limit;
+    while (__HAL_I2S_GET_FLAG(&hi2s1, I2S_FLAG_TXE) == RESET)
+    {
+      if (--timeout == 0) return HAL_TIMEOUT;
+    }
+    hi2s1.Instance->DR = (uint16_t)sample_r;
   }
-  else /* AUDIO_EAR_BOTH / Binaural */
-  {
-    *out_left  = (int16_t)((float)sample_stim * stim_env);
-    *out_right = (int16_t)((float)sample_stim * stim_env);
-  }
+
+  return HAL_OK;
 }
 
 /**
-  * @brief  Plays a stimulus tone and optional masking noise over SAI Block A to the PCM5102 DAC.
-  *         Includes 10 ms smooth attack/release anti-pop envelope ramps.
+  * @brief  Plays a stimulus tone and optional masking noise over Hardware I2S1 to the PCM5102 DAC.
   * @param  freq_hz: Frequency in Hertz (125 Hz - 8000 Hz)
   * @param  duration_ms: Duration of playback in milliseconds
   * @param  stim_mode: TONE_MODE_SINE or TONE_MODE_WARBLE
@@ -857,130 +1448,97 @@ void Audio_Generate_Sample_Pair_SAI(ChannelState *ch_stim, ChannelState *ch_mask
   * @param  ear: AUDIO_EAR_LEFT, AUDIO_EAR_RIGHT, or AUDIO_EAR_BOTH
   * @retval HAL_StatusTypeDef
   */
-HAL_StatusTypeDef Audio_Play_Tone_SAI(float freq_hz, uint32_t duration_ms,
+HAL_StatusTypeDef Audio_Play_Tone_I2S(float freq_hz, uint32_t duration_ms,
                                       int stim_mode, int mask_mode,
                                       float vol_stim, float vol_mask,
                                       uint8_t ear)
 {
   if (duration_ms == 0) return HAL_OK;
 
-  /* Initialize DSP synthesis channels */
   Audio_Channel_Init(&ch_stim, stim_mode, freq_hz, 123456789);
   Audio_Channel_Init(&ch_mask, mask_mode, freq_hz, 987654321);
 
   uint32_t sample_rate = (uint32_t)AUDIO_SAMPLE_RATE_HZ;
   uint32_t total_samples = (sample_rate * duration_ms) / 1000;
-  uint32_t fade_samples = (sample_rate * 10) / 1000; /* 10 ms anti-pop fade ramp */
-  if (fade_samples > total_samples / 2)
+  uint32_t fade_samples = (sample_rate * 10) / 1000;
+  if (fade_samples > total_samples / 2) fade_samples = total_samples / 2;
+
+  if ((hi2s1.Instance->I2SCFGR & SPI_I2SCFGR_I2SE) != SPI_I2SCFGR_I2SE)
   {
-    fade_samples = total_samples / 2;
+    __HAL_I2S_ENABLE(&hi2s1);
   }
 
-  /* Ensure SAI1 Block A transmitter is enabled (pre-fill FIFO to avoid startup underrun) */
-  if ((hsai_BlockA1.Instance->CR1 & SAI_xCR1_SAIEN) == RESET)
-  {
-    for (int k = 0; k < 4; k++)
-    {
-      hsai_BlockA1.Instance->DR = 0;
-    }
-    __HAL_SAI_ENABLE(&hsai_BlockA1);
-  }
+  uint32_t timeout_limit = 100000;
 
   for (uint32_t i = 0; i < total_samples; i++)
   {
-    /* Calculate dynamic envelope: 10 ms smooth fade-in and fade-out */
     float env_factor = 1.0f;
     if (i < fade_samples)
-    {
       env_factor = (float)i / (float)fade_samples;
-    }
     else if (i >= (total_samples - fade_samples))
-    {
       env_factor = (float)(total_samples - i) / (float)fade_samples;
-    }
 
-    float current_stim_env = vol_stim * env_factor;
-    float current_mask_env = vol_mask * env_factor;
+    float stim_env = vol_stim * env_factor;
+    float mask_env = vol_mask * env_factor;
 
-    int16_t left_sample = 0;
-    int16_t right_sample = 0;
+    int16_t sample_stim = Audio_Process_Channel(&ch_stim);
+    int16_t sample_mask = Audio_Process_Channel(&ch_mask);
 
-    Audio_Generate_Sample_Pair_SAI(&ch_stim, &ch_mask,
-                                   current_stim_env, current_mask_env, ear,
-                                   &left_sample, &right_sample);
-
-    /* 32-bit MSB alignment for standard Philips I2S 32-bit slot:
-     * Audio sample is placed in upper 16 bits (bits 31..16), lower 16 bits are 0 */
-    uint32_t left_word  = (uint32_t)(((int32_t)left_sample)  << 16);
-    uint32_t right_word = (uint32_t)(((int32_t)right_sample) << 16);
-
-    uint32_t timeout = 50000;
-    while ((hsai_BlockA1.Instance->SR & SAI_xSR_FLVL) == SAI_FIFOSTATUS_FULL)
+    int16_t sample_left = 0, sample_right = 0;
+    if (ear == AUDIO_EAR_LEFT)
     {
-      if (--timeout == 0) break;
+      sample_left  = (int16_t)((float)sample_stim * stim_env);
+      sample_right = (int16_t)((float)sample_mask * mask_env);
     }
-    hsai_BlockA1.Instance->DR = left_word;
-
-    timeout = 50000;
-    while ((hsai_BlockA1.Instance->SR & SAI_xSR_FLVL) == SAI_FIFOSTATUS_FULL)
+    else if (ear == AUDIO_EAR_RIGHT)
     {
-      if (--timeout == 0) break;
+      sample_left  = (int16_t)((float)sample_mask * mask_env);
+      sample_right = (int16_t)((float)sample_stim * stim_env);
     }
-    hsai_BlockA1.Instance->DR = right_word;
+    else
+    {
+      sample_left  = (int16_t)((float)sample_stim * stim_env);
+      sample_right = (int16_t)((float)sample_stim * stim_env);
+    }
+
+    /* Transmit Left Channel */
+    uint32_t timeout = timeout_limit;
+    while (__HAL_I2S_GET_FLAG(&hi2s1, I2S_FLAG_TXE) == RESET)
+    {
+      if (--timeout == 0) return HAL_TIMEOUT;
+    }
+    hi2s1.Instance->DR = (uint16_t)sample_left;
+
+    /* Transmit Right Channel */
+    timeout = timeout_limit;
+    while (__HAL_I2S_GET_FLAG(&hi2s1, I2S_FLAG_TXE) == RESET)
+    {
+      if (--timeout == 0) return HAL_TIMEOUT;
+    }
+    hi2s1.Instance->DR = (uint16_t)sample_right;
   }
 
   return HAL_OK;
 }
 
-/**
-  * @brief  Plays a Pure Tone (Sine) via SAI.
-  * @param  freq_hz: Frequency in Hertz (125 - 8000 Hz)
-  * @param  duration_ms: Duration in milliseconds
-  * @param  volume: Linear volume (0.0f to 1.0f)
-  * @param  ear: AUDIO_EAR_LEFT, AUDIO_EAR_RIGHT, or AUDIO_EAR_BOTH
-  * @retval HAL_StatusTypeDef
-  */
-HAL_StatusTypeDef Audio_Play_PureTone_SAI(float freq_hz, uint32_t duration_ms, float volume, uint8_t ear)
+HAL_StatusTypeDef Audio_Play_PureTone_I2S(float freq_hz, uint32_t duration_ms, float volume, uint8_t ear)
 {
-  return Audio_Play_Tone_SAI(freq_hz, duration_ms, TONE_MODE_SINE, TONE_MODE_OFF, volume, 0.0f, ear);
+  return Audio_Play_Tone_I2S(freq_hz, duration_ms, TONE_MODE_SINE, TONE_MODE_OFF, volume, 0.0f, ear);
 }
 
-/**
-  * @brief  Plays a Warble Tone (FM modulated, 5 Hz rate, 5% dev) via SAI.
-  * @param  freq_hz: Carrier frequency in Hertz
-  * @param  duration_ms: Duration in milliseconds
-  * @param  volume: Linear volume (0.0f to 1.0f)
-  * @param  ear: AUDIO_EAR_LEFT, AUDIO_EAR_RIGHT, or AUDIO_EAR_BOTH
-  * @retval HAL_StatusTypeDef
-  */
-HAL_StatusTypeDef Audio_Play_Warble_SAI(float freq_hz, uint32_t duration_ms, float volume, uint8_t ear)
+HAL_StatusTypeDef Audio_Play_Warble_I2S(float freq_hz, uint32_t duration_ms, float volume, uint8_t ear)
 {
-  return Audio_Play_Tone_SAI(freq_hz, duration_ms, TONE_MODE_WARBLE, TONE_MODE_OFF, volume, 0.0f, ear);
+  return Audio_Play_Tone_I2S(freq_hz, duration_ms, TONE_MODE_WARBLE, TONE_MODE_OFF, volume, 0.0f, ear);
 }
 
-/**
-  * @brief  Plays Narrow Band Noise (NBN, 1/3 octave bandpass filtered) via SAI.
-  * @param  freq_hz: Center frequency in Hertz
-  * @param  duration_ms: Duration in milliseconds
-  * @param  volume: Linear volume (0.0f to 1.0f)
-  * @param  ear: AUDIO_EAR_LEFT, AUDIO_EAR_RIGHT, or AUDIO_EAR_BOTH
-  * @retval HAL_StatusTypeDef
-  */
-HAL_StatusTypeDef Audio_Play_NBN_SAI(float freq_hz, uint32_t duration_ms, float volume, uint8_t ear)
+HAL_StatusTypeDef Audio_Play_NBN_I2S(float freq_hz, uint32_t duration_ms, float volume, uint8_t ear)
 {
-  return Audio_Play_Tone_SAI(freq_hz, duration_ms, TONE_MODE_NBN, TONE_MODE_OFF, volume, 0.0f, ear);
+  return Audio_Play_Tone_I2S(freq_hz, duration_ms, TONE_MODE_NBN, TONE_MODE_OFF, volume, 0.0f, ear);
 }
 
-/**
-  * @brief  Plays Broadband White Noise via SAI.
-  * @param  duration_ms: Duration in milliseconds
-  * @param  volume: Linear volume (0.0f to 1.0f)
-  * @param  ear: AUDIO_EAR_LEFT, AUDIO_EAR_RIGHT, or AUDIO_EAR_BOTH
-  * @retval HAL_StatusTypeDef
-  */
-HAL_StatusTypeDef Audio_Play_WhiteNoise_SAI(uint32_t duration_ms, float volume, uint8_t ear)
+HAL_StatusTypeDef Audio_Play_WhiteNoise_I2S(uint32_t duration_ms, float volume, uint8_t ear)
 {
-  return Audio_Play_Tone_SAI(1000.0f, duration_ms, TONE_MODE_WHITE_NOISE, TONE_MODE_OFF, volume, 0.0f, ear);
+  return Audio_Play_Tone_I2S(1000.0f, duration_ms, TONE_MODE_WHITE_NOISE, TONE_MODE_OFF, volume, 0.0f, ear);
 }
 
 /**

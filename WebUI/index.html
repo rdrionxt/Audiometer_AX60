@@ -1,0 +1,1919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AX60 Audiometer Control Panel</title>
+  <style>
+    :root {
+      --panel-bg: #e6e8eb;
+      --panel-border: #bcc2cb;
+      --card-bg: #ffffff;
+      --accent-blue: #0078d7;
+      --accent-green: #22c55e;
+      --accent-dark: #1e293b;
+      --lcd-bg: linear-gradient(145deg, #184b7a, #0d2d4d);
+      --lcd-text: #60d2ff;
+      --lcd-glow: rgba(96, 210, 255, 0.4);
+      --btn-white-top: #ffffff;
+      --btn-white-bot: #d6dbe1;
+      --btn-shadow: 0 4px 6px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.8), inset 0 -2px 4px rgba(0, 0, 0, 0.12);
+      --btn-active-shadow: 0 1px 2px rgba(0,0,0,0.2), inset 0 2px 4px rgba(0,0,0,0.3);
+      --text-label: #2c343e;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #0f172a;
+      color: #f1f5f9;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+    }
+
+    /* Top Serial Connection Bar */
+    .top-bar {
+      width: 100%;
+      max-width: 1280px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 12px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .brand-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: #38bdf8;
+    }
+
+    .brand-title .badge {
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      background: #0369a1;
+      color: #e0f2fe;
+    }
+
+    .serial-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .btn-serial {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #2563eb;
+      color: #ffffff;
+      border: none;
+      padding: 8px 18px;
+      border-radius: 6px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
+    }
+
+    .btn-serial:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-serial.connected {
+      background: #dc2626;
+    }
+
+    .btn-serial.connected:hover {
+      background: #b91c1c;
+    }
+
+    select {
+      background: #0f172a;
+      color: #f8fafc;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.85rem;
+      outline: none;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: #334155;
+      color: #94a3b8;
+    }
+
+    .status-pill.online {
+      background: rgba(34, 197, 94, 0.2);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.4);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    /* Live Hex Monitor at Top Bar */
+    .hex-preview-box {
+      font-family: "Courier New", Courier, monospace;
+      font-size: 0.9rem;
+      background: #090d16;
+      border: 1px solid #1e293b;
+      padding: 6px 14px;
+      border-radius: 6px;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .hex-preview-box span.label {
+      color: #64748b;
+      font-size: 0.75rem;
+      font-family: inherit;
+      font-weight: 600;
+    }
+
+    /* Main Audiometer Front Console */
+    .audiometer-console {
+      width: 100%;
+      max-width: 1280px;
+      background: var(--panel-bg);
+      border: 2px solid var(--panel-border);
+      border-radius: 20px;
+      padding: 30px 40px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), inset 0 2px 4px rgba(255, 255, 255, 0.8);
+      position: relative;
+      background-image: 
+        radial-gradient(#d1d5db 1px, transparent 1px),
+        linear-gradient(to bottom, #f3f4f6, #e5e7eb);
+      background-size: 16px 16px, 100% 100%;
+    }
+
+    /* Top Section: Left Bank | Center LCD | Right Bank */
+    .console-top-row {
+      display: grid;
+      grid-template-columns: 240px 1fr 240px;
+      gap: 24px;
+      align-items: center;
+      margin-bottom: 28px;
+    }
+
+    /* Button Banks (Left & Right) */
+    .btn-bank {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .btn-pair {
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      gap: 10px;
+    }
+
+    /* Circular 3D Push Button Item */
+    .btn-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-item.reverse {
+      flex-direction: row-reverse;
+    }
+
+    .btn-label {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-label);
+      min-width: 48px;
+      text-align: center;
+      letter-spacing: -0.2px;
+    }
+
+    .btn-round {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: linear-gradient(145deg, var(--btn-white-top), var(--btn-white-bot));
+      border: 1px solid #b8bec6;
+      box-shadow: var(--btn-shadow);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.08s ease;
+      touch-action: manipulation;
+      position: relative;
+    }
+
+    .btn-round:hover {
+      filter: brightness(1.04);
+    }
+
+    .btn-round:active, .btn-round.active {
+      transform: translateY(2px);
+      box-shadow: var(--btn-active-shadow);
+      background: linear-gradient(145deg, #c4cbd3, #e2e6eb);
+      border-color: #0284c7;
+    }
+
+    .btn-round .btn-num {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #334155;
+      line-height: 1;
+    }
+
+    /* Center LCD Screen */
+    .lcd-display-container {
+      background: #0f172a;
+      padding: 12px;
+      border-radius: 14px;
+      box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.8), 0 2px 4px rgba(255, 255, 255, 0.4);
+      border: 3px solid #334155;
+    }
+
+    .lcd-screen {
+      background: var(--lcd-bg);
+      height: 220px;
+      border-radius: 8px;
+      border: 2px solid #294663;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      color: var(--lcd-text);
+      box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.7);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .lcd-screen::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: -50%;
+      width: 200%;
+      height: 100%;
+      background: linear-gradient(115deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 40%, rgba(255,255,255,0.03) 100%);
+      pointer-events: none;
+    }
+
+    .lcd-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(96, 210, 255, 0.25);
+      padding-bottom: 6px;
+    }
+
+    .lcd-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      text-shadow: 0 0 6px var(--lcd-glow);
+    }
+
+    .lcd-channel-badges {
+      display: flex;
+      gap: 12px;
+      font-size: 0.8rem;
+    }
+
+    .lcd-badge {
+      background: rgba(0, 0, 0, 0.4);
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid rgba(96, 210, 255, 0.3);
+    }
+
+    .lcd-badge.active-ear {
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .lcd-badge.active-ear.left-ear {
+      background: #0284c7;
+      color: #fff;
+      border-color: #38bdf8;
+    }
+
+    .lcd-badge.active-ear.right-ear {
+      background: #dc2626;
+      color: #fff;
+      border-color: #f87171;
+    }
+
+    .lcd-badge.patient-badge {
+      background: #16a34a !important;
+      color: #ffffff !important;
+      font-weight: 700;
+      border-color: #4ade80 !important;
+      box-shadow: 0 0 10px rgba(34, 197, 94, 0.8);
+      animation: pulse-glow 0.8s infinite alternate;
+    }
+
+    @keyframes pulse-glow {
+      from { opacity: 0.8; transform: scale(1); }
+      to { opacity: 1; transform: scale(1.05); }
+    }
+
+    .lcd-body-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      text-align: center;
+      margin: 8px 0;
+    }
+
+    .lcd-param-card {
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      padding: 10px 8px;
+      border: 1px solid rgba(96, 210, 255, 0.2);
+    }
+
+    .lcd-param-name {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      color: #93c5fd;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+
+    .lcd-param-val {
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: #ffffff;
+      text-shadow: 0 0 10px var(--lcd-glow);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .lcd-param-unit {
+      font-size: 0.75rem;
+      color: #60d2ff;
+      margin-left: 2px;
+    }
+
+    .lcd-footer-status {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      border-top: 1px solid rgba(96, 210, 255, 0.25);
+      padding-top: 6px;
+      color: #93c5fd;
+    }
+
+    /* Middle Horizontal Row of Dark Buttons */
+    .console-middle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 18px 0;
+      border-top: 1px dashed #cbd5e1;
+      border-bottom: 1px dashed #cbd5e1;
+      margin-bottom: 24px;
+    }
+
+    .btn-capsule-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+    }
+
+    .capsule-label {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--text-label);
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .btn-capsule {
+      width: 100%;
+      max-width: 90px;
+      height: 38px;
+      background: linear-gradient(180deg, #334155 0%, #1e293b 100%);
+      border: 1px solid #0f172a;
+      border-radius: 6px;
+      box-shadow: 0 3px 6px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 0.95rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.08s ease;
+      touch-action: manipulation;
+    }
+
+    .btn-capsule:hover {
+      background: linear-gradient(180deg, #475569 0%, #334155 100%);
+    }
+
+    .btn-capsule:active, .btn-capsule.active {
+      transform: translateY(2px);
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.7);
+      background: #0f172a;
+      border-color: #38bdf8;
+      color: #38bdf8;
+    }
+
+    .capsule-num {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #64748b;
+    }
+
+    /* Bottom Section: Encoders & Stimulus & Freq */
+    .console-bottom-row {
+      display: grid;
+      grid-template-columns: 280px 1fr 280px;
+      align-items: center;
+      gap: 20px;
+    }
+
+    /* Rotary Encoder Component */
+    .encoder-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .encoder-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .encoder-step-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #e2e8f0;
+      border: 1px solid #94a3b8;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      font-weight: 800;
+      font-size: 1rem;
+      color: #1e293b;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.1s;
+    }
+
+    .encoder-step-btn:active {
+      transform: scale(0.92);
+      background: #cbd5e1;
+    }
+
+    .encoder-dial-container {
+      position: relative;
+      width: 124px;
+      height: 124px;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    .encoder-dial-container:active {
+      cursor: grabbing;
+    }
+
+    .encoder-ticks {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .encoder-knob {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #ffffff 0%, #d8dde3 60%, #9ca3af 100%);
+      border: 2px solid #475569;
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.25), inset 0 2px 3px rgba(255, 255, 255, 0.8), inset 0 -3px 6px rgba(0, 0, 0, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.05s ease-out;
+    }
+
+    .knob-pointer {
+      position: absolute;
+      top: 8px;
+      left: calc(50% - 2px);
+      width: 4px;
+      height: 24px;
+      background: #dc2626;
+      border-radius: 2px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+    }
+
+    .knob-inner-ring {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      border: 1px dashed #94a3b8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #475569;
+    }
+
+    .encoder-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-label);
+      text-align: center;
+      margin-top: 4px;
+    }
+
+    .encoder-value-readout {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #0369a1;
+      background: #e0f2fe;
+      border: 1px solid #bae6fd;
+      padding: 2px 12px;
+      border-radius: 9999px;
+      min-width: 84px;
+      text-align: center;
+    }
+
+    /* Bottom Center Cluster: Stimulus & Frequency buttons */
+    .bottom-center-cluster {
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      gap: 16px;
+    }
+
+    /* Green Stimulus Push Button */
+    .stimulus-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-stimulus {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #4ade80 0%, #16a34a 60%, #15803d 100%);
+      border: 2px solid #14532d;
+      box-shadow: 0 6px 12px rgba(22, 163, 74, 0.4), inset 0 2px 3px rgba(255, 255, 255, 0.7);
+      color: #ffffff;
+      font-size: 1.1rem;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.08s ease;
+      touch-action: manipulation;
+    }
+
+    .btn-stimulus:hover {
+      filter: brightness(1.1);
+    }
+
+    .btn-stimulus:active, .btn-stimulus.active {
+      transform: translateY(3px);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4), inset 0 3px 6px rgba(0, 0, 0, 0.4);
+      background: radial-gradient(circle at 50% 50%, #15803d 0%, #166534 100%);
+    }
+
+    .stimulus-label {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-label);
+    }
+
+    /* Center Frequency Arrow Buttons */
+    .freq-cluster {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .freq-btn-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .btn-freq {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #475569 0%, #1e293b 60%, #0f172a 100%);
+      border: 2px solid #000000;
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4), inset 0 2px 3px rgba(255, 255, 255, 0.3);
+      color: #ffffff;
+      font-size: 1.3rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.08s ease;
+      touch-action: manipulation;
+    }
+
+    .btn-freq:hover {
+      filter: brightness(1.2);
+    }
+
+    .btn-freq:active, .btn-freq.active {
+      transform: translateY(3px);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.5), inset 0 3px 6px rgba(0, 0, 0, 0.8);
+      color: #38bdf8;
+    }
+
+    .btn-freq .freq-num {
+      font-size: 0.7rem;
+      font-weight: 700;
+      margin-bottom: -4px;
+      color: #94a3b8;
+    }
+
+    .freq-label {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text-label);
+      letter-spacing: 0.5px;
+    }
+
+    /* Live Transmission Log / Diagnostics Console */
+    .diagnostics-panel {
+      width: 100%;
+      max-width: 1280px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      margin-top: 16px;
+      padding: 16px 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .diag-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #334155;
+      padding-bottom: 8px;
+    }
+
+    .diag-header h3 {
+      font-size: 0.95rem;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .diag-log-view {
+      height: 120px;
+      overflow-y: auto;
+      background: #090d16;
+      border: 1px solid #1e293b;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-family: "Courier New", Courier, monospace;
+      font-size: 0.82rem;
+      color: #cbd5e1;
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 4px;
+    }
+
+    .log-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .log-time {
+      color: #64748b;
+    }
+
+    .log-hex {
+      color: #38bdf8;
+      font-weight: bold;
+    }
+
+    .log-desc {
+      color: #a7f3d0;
+    }
+
+    /* Responsive */
+    @media (max-width: 1100px) {
+      .console-top-row {
+        grid-template-columns: 1fr;
+      }
+      .console-bottom-row {
+        grid-template-columns: 1fr;
+      }
+      .console-middle-row {
+        flex-wrap: wrap;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Connection Bar for CH340G Serial -->
+  <div class="top-bar">
+    <div class="brand-title">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+      </svg>
+      AX60 Audiometer Control Console
+      <span class="badge">CH340G USB UART</span>
+    </div>
+
+    <div class="serial-controls">
+      <div class="hex-preview-box">
+        <span class="label">LAST TX HEX:</span>
+        <span id="lastTxHexDisplay">AA 00 00 00 00 00 00 55</span>
+      </div>
+
+      <label for="baudSelect" style="font-size: 0.82rem; color: #94a3b8;">Baud:</label>
+      <select id="baudSelect">
+        <option value="115200" selected>115200</option>
+        <option value="57600">57600</option>
+        <option value="38400">38400</option>
+        <option value="9600">9600</option>
+      </select>
+
+      <button id="btnSerialConnect" class="btn-serial">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="m4.93 4.93 4.24 4.24"/>
+          <path d="m14.83 9.17 4.24-4.24"/>
+          <path d="m14.83 14.83 4.24 4.24"/>
+          <path d="m9.17 14.83-4.24 4.24"/>
+        </svg>
+        Connect Serial
+      </button>
+
+      <div id="connStatusPill" class="status-pill">
+        <span class="status-dot"></span>
+        <span id="connStatusText">Offline (Ready)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Audiometer Hardware Panel (recreating image layout) -->
+  <div class="audiometer-console" id="audiometerPanel">
+
+    <!-- Top Row: Left Buttons (12,13,10,11,8,9), Center Screen, Right Buttons (18,19,16,17,14,15) -->
+    <div class="console-top-row">
+
+      <!-- Left Bank -->
+      <div class="btn-bank">
+        <!-- Row 1: Pulse 12, 13 Cont -->
+        <div class="btn-pair">
+          <div class="btn-item">
+            <span class="btn-label">Pulse</span>
+            <div class="btn-round" data-btn-id="12" data-byte="1" data-bit="1">
+              <span class="btn-num">12</span>
+            </div>
+          </div>
+          <div class="btn-item reverse">
+            <span class="btn-label">Cont</span>
+            <div class="btn-round" data-btn-id="13" data-byte="1" data-bit="2">
+              <span class="btn-num">13</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 2: 1,3,5 10, 11 20dB -->
+        <div class="btn-pair">
+          <div class="btn-item">
+            <span class="btn-label">1,3,5</span>
+            <div class="btn-round" data-btn-id="10" data-byte="0" data-bit="7">
+              <span class="btn-num">10</span>
+            </div>
+          </div>
+          <div class="btn-item reverse">
+            <span class="btn-label">20dB</span>
+            <div class="btn-round" data-btn-id="11" data-byte="1" data-bit="0">
+              <span class="btn-num">11</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 3: IN 8 (CH1 Input), 9 Out (CH1 Output) -->
+        <div class="btn-pair">
+          <div class="btn-item">
+            <span class="btn-label" id="lblCh1In">IN (Sine)</span>
+            <div class="btn-round" data-btn-id="8" data-byte="0" data-bit="5" title="Click to toggle CH1 Tone (Pure Sine / Warble)">
+              <span class="btn-num">8</span>
+            </div>
+          </div>
+          <div class="btn-item reverse">
+            <span class="btn-label" id="lblCh1Out">Out (AC)</span>
+            <div class="btn-round" data-btn-id="9" data-byte="0" data-bit="6" title="Click to cycle CH1 Transducer (AC / BC / FF)">
+              <span class="btn-num">9</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Center LCD Screen Display -->
+      <div class="lcd-display-container">
+        <div class="lcd-screen">
+          <div class="lcd-header">
+            <div class="lcd-title">AX60 AUDIOMETER SYSTEM</div>
+            <div class="lcd-channel-badges">
+              <span class="lcd-badge active-ear left-ear" id="lcdEarBadge" style="cursor:pointer;" title="Click to switch Ear (LEFT / RIGHT)">CH1: LEFT (AC)</span>
+              <span class="lcd-badge" id="lcdCh1ToneBadge" style="cursor:pointer; background:#0284c7; color:#fff;" title="Click to toggle CH1 Tone">CH1: PURE SINE</span>
+              <span class="lcd-badge" id="lcdCh2Badge" style="cursor:pointer; background:#334155; color:#f1f5f9;" title="Click to toggle CH2 Noise">CH2: WN (AC R)</span>
+              <span class="lcd-badge" id="lcdPulseBadge" style="display:none; background:#d97706; color:#fff; font-weight:bold;">PULSE</span>
+              <span class="lcd-badge" id="lcdContBadge" style="display:none; background:#7c3aed; color:#fff; font-weight:bold;">CONT</span>
+              <span class="lcd-badge patient-badge" id="lcdPatientBadge" style="display:none;">PATIENT RESP</span>
+            </div>
+          </div>
+
+          <div class="lcd-body-grid">
+            <div class="lcd-param-card">
+              <div class="lcd-param-name">CH1 Stimulus (3)</div>
+              <div class="lcd-param-val" id="lcdPureToneVal">90<span class="lcd-param-unit">dB</span></div>
+            </div>
+            <div class="lcd-param-card">
+              <div class="lcd-param-name">Frequency (1/2)</div>
+              <div class="lcd-param-val" id="lcdFreqVal">1000<span class="lcd-param-unit">Hz</span></div>
+            </div>
+            <div class="lcd-param-card">
+              <div class="lcd-param-name">CH2 Masking (4)</div>
+              <div class="lcd-param-val" id="lcdMaskingVal">0<span class="lcd-param-unit">dB</span></div>
+            </div>
+          </div>
+
+          <div class="lcd-footer-status">
+            <span id="lcdStimStatus" style="color:#93c5fd;">STIMULUS: IDLE</span>
+            <span id="lcdAckStatus" style="color:#38bdf8;">ACK: IDLE</span>
+            <span id="lcdPacketCounter">TX FRAMES: 0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Bank: 18 Erase, 19 Save, 16 Track, 17 NR, 14 IN, 15 Out -->
+      <div class="btn-bank">
+        <!-- Row 1: 18 Erase, Save 19 -->
+        <div class="btn-pair">
+          <div class="btn-item">
+            <span class="btn-label">Erase</span>
+            <div class="btn-round" data-btn-id="18" data-byte="1" data-bit="7">
+              <span class="btn-num">18</span>
+            </div>
+          </div>
+          <div class="btn-item reverse">
+            <span class="btn-label" style="color:#0284c7;">Save</span>
+            <div class="btn-round" data-btn-id="19" data-byte="2" data-bit="0">
+              <span class="btn-num">19</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 2: 16 Track, N R 17 -->
+        <div class="btn-pair">
+          <div class="btn-item">
+            <span class="btn-label">Track</span>
+            <div class="btn-round" data-btn-id="16" data-byte="1" data-bit="5">
+              <span class="btn-num">16</span>
+            </div>
+          </div>
+          <div class="btn-item reverse">
+            <span class="btn-label">N R</span>
+            <div class="btn-round" data-btn-id="17" data-byte="1" data-bit="6">
+              <span class="btn-num">17</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 3: 14 IN (CH2 Input), Out 15 (CH2 Output) -->
+        <div class="btn-pair">
+          <div class="btn-item">
+            <span class="btn-label" id="lblCh2In">IN (WN)</span>
+            <div class="btn-round" data-btn-id="14" data-byte="1" data-bit="3" title="Click to toggle CH2 Noise (White Noise / NBN)">
+              <span class="btn-num">14</span>
+            </div>
+          </div>
+          <div class="btn-item reverse">
+            <span class="btn-label" id="lblCh2Out">Out (AC R)</span>
+            <div class="btn-round" data-btn-id="15" data-byte="1" data-bit="4" title="CH2 Masking Output Transducer">
+              <span class="btn-num">15</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Middle Row: 20 Home, 7 Ear, 21 Back, 22 Store, 23 Talk Over, 24 Talk Back, 25 Result, 26 Test -->
+    <div class="console-middle-row">
+      <div class="btn-capsule-item">
+        <span class="capsule-label">Home</span>
+        <button class="btn-capsule" data-btn-id="20" data-byte="2" data-bit="1"></button>
+        <span class="capsule-num">20</span>
+      </div>
+
+      <div class="btn-capsule-item">
+        <span class="capsule-label" id="lblEar">Ear (LEFT)</span>
+        <button class="btn-capsule" data-btn-id="7" data-byte="0" data-bit="4" title="Click to toggle Ear (LEFT / RIGHT)">7</button>
+        <span class="capsule-num">7</span>
+      </div>
+
+      <div class="btn-capsule-item">
+        <span class="capsule-label">Back</span>
+        <button class="btn-capsule" data-btn-id="21" data-byte="2" data-bit="2"></button>
+        <span class="capsule-num">21</span>
+      </div>
+
+      <div class="btn-capsule-item">
+        <span class="capsule-label">Store</span>
+        <button class="btn-capsule" data-btn-id="22" data-byte="2" data-bit="3"></button>
+        <span class="capsule-num">22</span>
+      </div>
+
+      <div class="btn-capsule-item">
+        <span class="capsule-label">Talk Over</span>
+        <button class="btn-capsule" data-btn-id="23" data-byte="2" data-bit="4"></button>
+        <span class="capsule-num">23</span>
+      </div>
+
+      <div class="btn-capsule-item">
+        <span class="capsule-label">Talk Back</span>
+        <button class="btn-capsule" data-btn-id="24" data-byte="2" data-bit="5"></button>
+        <span class="capsule-num">24</span>
+      </div>
+
+      <div class="btn-capsule-item">
+        <span class="capsule-label">Result</span>
+        <button class="btn-capsule" data-btn-id="25" data-byte="2" data-bit="6"></button>
+        <span class="capsule-num">25</span>
+      </div>
+
+      <div class="btn-capsule-item">
+        <span class="capsule-label">Test</span>
+        <button class="btn-capsule" data-btn-id="26" data-byte="2" data-bit="7"></button>
+        <span class="capsule-num">26</span>
+      </div>
+    </div>
+
+    <!-- Bottom Row: 3 (Puretone Intensity Encoder), 5 Stimulus, 1 & 2 Frequency, 6 Stimulus, 4 (Masking Intensity Encoder) -->
+    <div class="console-bottom-row">
+
+      <!-- Left Rotary Encoder: 3 Puretone Intensity Encoder (-10 to 120 dB, 5 dB step) -->
+      <div class="encoder-card">
+        <div class="encoder-wrap">
+          <button class="encoder-step-btn" id="btnPureToneDec" title="-5 dB">-</button>
+          <div class="encoder-dial-container" id="pureToneDial">
+            <svg class="encoder-ticks" viewBox="0 0 124 124">
+              <!-- Radial ticks rendered dynamically -->
+              <g id="pureToneTicksGroup"></g>
+            </svg>
+            <div class="encoder-knob" id="pureToneKnob">
+              <div class="knob-pointer"></div>
+              <div class="knob-inner-ring">3</div>
+            </div>
+          </div>
+          <button class="encoder-step-btn" id="btnPureToneInc" title="+5 dB">+</button>
+        </div>
+        <div class="encoder-value-readout" id="pureToneValueDisplay">90 dB</div>
+        <div class="encoder-title">Puretone Intensity Encoder (3)</div>
+      </div>
+
+      <!-- Center Controls: 5 Stimulus | 1 & 2 Frequency | 6 Stimulus -->
+      <div class="bottom-center-cluster">
+        <!-- 5 Stimulus (Left / Puretone) -->
+        <div class="stimulus-wrapper">
+          <div class="btn-stimulus" data-btn-id="5" data-byte="0" data-bit="2">5</div>
+          <span class="stimulus-label">Stimulus</span>
+        </div>
+
+        <!-- 1 & 2 Frequency Arrows -->
+        <div class="freq-cluster">
+          <div class="freq-btn-row">
+            <!-- 1 Frequency Left Arrow -->
+            <div class="btn-freq" data-btn-id="1" data-byte="0" data-bit="0" title="Frequency Step Down">
+              <span class="freq-num">1</span>
+              <span>&#10140;</span>
+            </div>
+            <!-- 2 Frequency Right Arrow -->
+            <div class="btn-freq" data-btn-id="2" data-byte="0" data-bit="1" title="Frequency Step Up">
+              <span class="freq-num">2</span>
+              <span>&#10140;</span>
+            </div>
+          </div>
+          <span class="freq-label">Frequency</span>
+        </div>
+
+        <!-- 6 Stimulus (Right / Masking) -->
+        <div class="stimulus-wrapper">
+          <div class="btn-stimulus" data-btn-id="6" data-byte="0" data-bit="3">6</div>
+          <span class="stimulus-label">Stimulus</span>
+        </div>
+      </div>
+
+      <!-- Right Rotary Encoder: 4 Masking Intensity Encoder (-10 to 120 dB, 5 dB step) -->
+      <div class="encoder-card">
+        <div class="encoder-wrap">
+          <button class="encoder-step-btn" id="btnMaskingDec" title="-5 dB">-</button>
+          <div class="encoder-dial-container" id="maskingDial">
+            <svg class="encoder-ticks" viewBox="0 0 124 124">
+              <g id="maskingTicksGroup"></g>
+            </svg>
+            <div class="encoder-knob" id="maskingKnob">
+              <div class="knob-pointer"></div>
+              <div class="knob-inner-ring">4</div>
+            </div>
+          </div>
+          <button class="encoder-step-btn" id="btnMaskingInc" title="+5 dB">+</button>
+        </div>
+        <div class="encoder-value-readout" id="maskingValueDisplay">0 dB</div>
+        <div class="encoder-title">Masking Intensity Encoder (4)</div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Real-time Diagnostics and HEX Log Panel -->
+  <div class="diagnostics-panel">
+    <div class="diag-header">
+      <h3>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        UART Packet Stream & Event Log
+      </h3>
+      <button id="btnClearLog" style="background:none; border:1px solid #475569; color:#94a3b8; padding:2px 8px; border-radius:4px; font-size:0.75rem; cursor:pointer;">Clear Log</button>
+    </div>
+    <div class="diag-log-view" id="diagLogView">
+      <div class="log-row">
+        <span class="log-time">[System]</span>
+        <span class="log-desc">AX60 Web UI initialized. Connect CH340G to begin live hardware control.</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* =========================================================================
+     * AUDIOMETER STATE & PROTOCOL DEFINITION
+     * ========================================================================= */
+    const DB_MIN = -10;
+    const DB_MAX = 120;
+    const DB_STEP = 5;
+
+    // Frequencies matching AX60 standard
+    const FREQUENCIES = [125, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 6000, 8000];
+    let freqIndex = 4; // 1000 Hz default
+    let activeEar = 'LEFT'; // 'LEFT' or 'RIGHT' (belongs strictly to CH1 tones)
+
+    // Audio Routing & Transducer State
+    let ch1ToneMode = 0;    // 0 = PURE SINE, 1 = WARBLE
+    let ch1Transducer = 0;  // 0 = AC, 1 = BC, 2 = FF
+    let ch2NoiseMode = 0;   // 0 = WHITE NOISE (WN), 1 = NBN NOISE (NBN)
+
+    const CH1_TRANSDUCERS = ['AC', 'BC', 'FF'];
+    const CH1_TONES = ['PURE SINE', 'WARBLE'];
+    const CH2_NOISES = ['WN', 'NBN'];
+
+    function getCh2TransducerName() {
+      if (ch1Transducer === 0) {
+        // If CH1 is AC, CH2 is AC on opposite ear
+        return (activeEar === 'LEFT') ? 'AC R' : 'AC L';
+      } else if (ch1Transducer === 1) {
+        // If CH1 is Bone Conduction, CH2 is Insert Earphone on non-test ear
+        return 'Insert';
+      } else {
+        // If CH1 is Free Field, CH2 is Free Field opposite speaker
+        return (activeEar === 'LEFT') ? 'FF R' : 'FF L';
+      }
+    }
+
+    function updateRoutingDisplays() {
+      const ch1TransName = CH1_TRANSDUCERS[ch1Transducer];
+      const ch1ToneName = CH1_TONES[ch1ToneMode];
+      const ch2NoiseName = CH2_NOISES[ch2NoiseMode];
+      const ch2TransName = getCh2TransducerName();
+
+      // Button 8 Label (CH1 IN)
+      const lblCh1In = document.getElementById('lblCh1In');
+      if (lblCh1In) lblCh1In.textContent = (ch1ToneMode === 0) ? 'IN (Sine)' : 'IN (Warble)';
+
+      // Button 9 Label (CH1 OUT)
+      const lblCh1Out = document.getElementById('lblCh1Out');
+      if (lblCh1Out) lblCh1Out.textContent = `Out (${ch1TransName})`;
+
+      // Button 14 Label (CH2 IN)
+      const lblCh2In = document.getElementById('lblCh2In');
+      if (lblCh2In) lblCh2In.textContent = `IN (${ch2NoiseName})`;
+
+      // Button 15 Label (CH2 OUT)
+      const lblCh2Out = document.getElementById('lblCh2Out');
+      if (lblCh2Out) lblCh2Out.textContent = `Out (${ch2TransName})`;
+
+      // Button 7 Label (Ear)
+      const lblEar = document.getElementById('lblEar');
+      if (lblEar) lblEar.textContent = `Ear (${activeEar})`;
+
+      // Center LCD Badges
+      const lcdEarBadge = document.getElementById('lcdEarBadge');
+      if (lcdEarBadge) {
+        lcdEarBadge.textContent = `CH1: ${activeEar} (${ch1TransName})`;
+        lcdEarBadge.className = `lcd-badge active-ear ${activeEar.toLowerCase()}-ear`;
+      }
+
+      const lcdCh1ToneBadge = document.getElementById('lcdCh1ToneBadge');
+      if (lcdCh1ToneBadge) {
+        lcdCh1ToneBadge.textContent = `CH1: ${ch1ToneName}`;
+      }
+
+      const lcdCh2Badge = document.getElementById('lcdCh2Badge');
+      if (lcdCh2Badge) {
+        lcdCh2Badge.textContent = `CH2: ${ch2NoiseName} (${ch2TransName})`;
+      }
+    }
+
+    function toggleCh1Tone() {
+      ch1ToneMode = (ch1ToneMode === 0) ? 1 : 0;
+      updateRoutingDisplays();
+      transmitState(`CH1 Tone switched to ${CH1_TONES[ch1ToneMode]}`);
+    }
+
+    function cycleCh1Transducer() {
+      ch1Transducer = (ch1Transducer + 1) % 3;
+      updateRoutingDisplays();
+      transmitState(`Transducers switched to CH1: ${CH1_TRANSDUCERS[ch1Transducer]}, CH2: ${getCh2TransducerName()}`);
+    }
+
+    function toggleCh2Noise() {
+      ch2NoiseMode = (ch2NoiseMode === 0) ? 1 : 0;
+      updateRoutingDisplays();
+      transmitState(`CH2 Noise switched to ${CH2_NOISES[ch2NoiseMode]}`);
+    }
+
+    function toggleEarSelection() {
+      activeEar = (activeEar === 'LEFT') ? 'RIGHT' : 'LEFT';
+      updateRoutingDisplays();
+      transmitState(`Ear Selection switched to CH1: ${activeEar}, CH2: ${getCh2TransducerName()}`);
+    }
+
+    // State Variables
+    let pureToneDb = 90;
+    let maskingDb = 0;
+    const btnBitmask = [0x00, 0x00, 0x00]; // Byte 0, Byte 1, Byte 2 (all released/idle)
+
+    // Serial Connection State
+    let serialPort = null;
+    let serialWriter = null;
+    let serialReader = null;
+    let keepReading = false;
+    let isConnected = false;
+    let lastSentPacket = null;
+    let packetCounter = 0;
+    let pulseActive = false;
+    let contActive = false; /* Continuous tone idle by default */
+
+    /* Generate radial tick marks for encoders */
+    function renderDialTicks(groupId) {
+      const g = document.getElementById(groupId);
+      if (!g) return;
+      const cx = 62;
+      const cy = 62;
+      const r1 = 52;
+      const r2 = 58;
+      const totalSteps = ((DB_MAX - DB_MIN) / DB_STEP) + 1; // 27 steps
+      const startAngle = -135;
+      const endAngle = 135;
+      const sweep = endAngle - startAngle;
+
+      let html = '';
+      for (let i = 0; i < totalSteps; i++) {
+        const angleDeg = startAngle + (i / (totalSteps - 1)) * sweep;
+        const angleRad = (angleDeg - 90) * (Math.PI / 180);
+        const x1 = cx + r1 * Math.cos(angleRad);
+        const y1 = cy + r1 * Math.sin(angleRad);
+        const x2 = cx + r2 * Math.cos(angleRad);
+        const y2 = cy + r2 * Math.sin(angleRad);
+        const isMajor = (i % 5 === 0);
+        const strokeColor = isMajor ? '#1e293b' : '#94a3b8';
+        const strokeWidth = isMajor ? '2.5' : '1.2';
+        html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-linecap="round" />`;
+      }
+      g.innerHTML = html;
+    }
+
+    renderDialTicks('pureToneTicksGroup');
+    renderDialTicks('maskingTicksGroup');
+
+    /* Convert dB to knob angle (-135 deg to +135 deg) */
+    function dbToAngle(db) {
+      const normalized = (db - DB_MIN) / (DB_MAX - DB_MIN);
+      return -135 + normalized * 270;
+    }
+
+    function updateEncoderDisplay() {
+      // Puretone
+      const ptAngle = dbToAngle(pureToneDb);
+      document.getElementById('pureToneKnob').style.transform = `rotate(${ptAngle}deg)`;
+      document.getElementById('pureToneValueDisplay').textContent = `${pureToneDb} dB`;
+      document.getElementById('lcdPureToneVal').innerHTML = `${pureToneDb}<span class="lcd-param-unit">dB</span>`;
+
+      // Masking
+      const maskAngle = dbToAngle(maskingDb);
+      document.getElementById('maskingKnob').style.transform = `rotate(${maskAngle}deg)`;
+      document.getElementById('maskingValueDisplay').textContent = `${maskingDb} dB`;
+      document.getElementById('lcdMaskingVal').innerHTML = `${maskingDb}<span class="lcd-param-unit">dB</span>`;
+
+      // Transmit state
+      transmitStateIfChanged('Encoder change');
+    }
+
+    /* Setup Knob Drag & Wheel Interaction */
+    function setupKnobDrag(dialId, getVal, setVal) {
+      const dial = document.getElementById(dialId);
+      let isDragging = false;
+      let startY = 0;
+      let startVal = 0;
+
+      dial.addEventListener('pointerdown', (e) => {
+        isDragging = true;
+        dial.setPointerCapture(e.pointerId);
+        startY = e.clientY;
+        startVal = getVal();
+        e.preventDefault();
+      });
+
+      dial.addEventListener('pointermove', (e) => {
+        if (!isDragging) return;
+        const deltaY = startY - e.clientY; // drag up to increase
+        const steps = Math.floor(deltaY / 10);
+        let newVal = startVal + steps * DB_STEP;
+        newVal = Math.max(DB_MIN, Math.min(DB_MAX, newVal));
+        if (newVal !== getVal()) {
+          setVal(newVal);
+          updateEncoderDisplay();
+        }
+      });
+
+      const stopDrag = (e) => {
+        if (isDragging) {
+          isDragging = false;
+          try { dial.releasePointerCapture(e.pointerId); } catch (_) {}
+        }
+      };
+
+      dial.addEventListener('pointerup', stopDrag);
+      dial.addEventListener('pointercancel', stopDrag);
+
+      // Mouse Wheel Support
+      dial.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const dir = e.deltaY < 0 ? 1 : -1;
+        let newVal = getVal() + dir * DB_STEP;
+        newVal = Math.max(DB_MIN, Math.min(DB_MAX, newVal));
+        if (newVal !== getVal()) {
+          setVal(newVal);
+          updateEncoderDisplay();
+        }
+      }, { passive: false });
+    }
+
+    setupKnobDrag('pureToneDial', () => pureToneDb, (v) => { pureToneDb = v; });
+    setupKnobDrag('maskingDial', () => maskingDb, (v) => { maskingDb = v; });
+
+    // +/- Step Buttons
+    document.getElementById('btnPureToneDec').addEventListener('click', () => {
+      pureToneDb = Math.max(DB_MIN, pureToneDb - DB_STEP);
+      updateEncoderDisplay();
+    });
+    document.getElementById('btnPureToneInc').addEventListener('click', () => {
+      pureToneDb = Math.min(DB_MAX, pureToneDb + DB_STEP);
+      updateEncoderDisplay();
+    });
+    document.getElementById('btnMaskingDec').addEventListener('click', () => {
+      maskingDb = Math.max(DB_MIN, maskingDb - DB_STEP);
+      updateEncoderDisplay();
+    });
+    document.getElementById('btnMaskingInc').addEventListener('click', () => {
+      maskingDb = Math.min(DB_MAX, maskingDb + DB_STEP);
+      updateEncoderDisplay();
+    });
+
+    /* =========================================================================
+     * PUSH BUTTONS & INTERACTION HANDLERS (MOUSE / TOUCH)
+     * ========================================================================= */
+    const allButtons = document.querySelectorAll('[data-btn-id]');
+
+    // Stimulus Presentation Timers & State
+    let stim5Timer = null;
+    let stim6Timer = null;
+
+    function activateStimulus5(pressed) {
+      if (stim5Timer) {
+        clearTimeout(stim5Timer);
+        stim5Timer = null;
+      }
+
+      const btn = document.querySelector('[data-btn-id="5"]');
+      const stimStatus = document.getElementById('lcdStimStatus');
+
+      if (pressed) {
+        btnBitmask[0] |= (1 << 2);
+        if (btn) btn.classList.add('active');
+        if (stimStatus) {
+          stimStatus.textContent = 'STIMULUS: ACTIVE (PURETONE)';
+          stimStatus.style.color = '#4ade80';
+        }
+        transmitState('Button 5 (Puretone Stim) ACTIVE');
+      } else {
+        btnBitmask[0] &= ~(1 << 2);
+        if (btn) btn.classList.remove('active');
+        if (stimStatus) {
+          if (contActive) {
+            stimStatus.textContent = 'STIMULUS: CONTINUOUS (ACTIVE)';
+            stimStatus.style.color = '#c084fc';
+          } else {
+            stimStatus.textContent = 'STIMULUS: IDLE';
+            stimStatus.style.color = '#93c5fd';
+          }
+        }
+        transmitState('Button 5 (Puretone Stim) RELEASE');
+        // Redundant release frame 50ms later guarantees MCU never misses the release frame
+        stim5Timer = setTimeout(() => {
+          transmitState('Button 5 (Puretone Stim) RELEASE CONFIRM');
+          stim5Timer = null;
+        }, 50);
+      }
+    }
+
+    function activateStimulus6(pressed) {
+      if (stim6Timer) {
+        clearTimeout(stim6Timer);
+        stim6Timer = null;
+      }
+
+      const btn = document.querySelector('[data-btn-id="6"]');
+      const stimStatus = document.getElementById('lcdStimStatus');
+
+      if (pressed) {
+        btnBitmask[0] |= (1 << 3);
+        if (btn) btn.classList.add('active');
+        if (stimStatus) {
+          stimStatus.textContent = 'STIMULUS: ACTIVE (MASKING)';
+          stimStatus.style.color = '#4ade80';
+        }
+        transmitState('Button 6 (Masking Stim) ACTIVE');
+      } else {
+        btnBitmask[0] &= ~(1 << 3);
+        if (btn) btn.classList.remove('active');
+        if (stimStatus) {
+          if (contActive) {
+            stimStatus.textContent = 'STIMULUS: CONTINUOUS (ACTIVE)';
+            stimStatus.style.color = '#c084fc';
+          } else {
+            stimStatus.textContent = 'STIMULUS: IDLE';
+            stimStatus.style.color = '#93c5fd';
+          }
+        }
+        transmitState('Button 6 (Masking Stim) RELEASE');
+        stim6Timer = setTimeout(() => {
+          transmitState('Button 6 (Masking Stim) RELEASE CONFIRM');
+          stim6Timer = null;
+        }, 50);
+      }
+    }
+
+    function toggleContinuousMode() {
+      contActive = !contActive;
+      const btn = document.querySelector('[data-btn-id="13"]');
+      const contBadge = document.getElementById('lcdContBadge');
+      const stimStatus = document.getElementById('lcdStimStatus');
+
+      if (contActive) {
+        btnBitmask[1] |= (1 << 2);
+        if (btn) btn.classList.add('active');
+        if (contBadge) contBadge.style.display = 'inline-block';
+        if (stimStatus) {
+          stimStatus.textContent = 'STIMULUS: CONTINUOUS (ACTIVE)';
+          stimStatus.style.color = '#c084fc';
+        }
+      } else {
+        btnBitmask[1] &= ~(1 << 2);
+        if (btn) btn.classList.remove('active');
+        if (contBadge) contBadge.style.display = 'none';
+        if (stimStatus) {
+          stimStatus.textContent = 'STIMULUS: IDLE';
+          stimStatus.style.color = '#93c5fd';
+        }
+      }
+      transmitState(`Continuous Tone ${contActive ? 'ON' : 'OFF'}`);
+    }
+
+    function togglePulseMode() {
+      pulseActive = !pulseActive;
+      const btn = document.querySelector('[data-btn-id="12"]');
+      const pulseBadge = document.getElementById('lcdPulseBadge');
+
+      if (pulseActive) {
+        if (btn) btn.classList.add('active');
+        if (pulseBadge) pulseBadge.style.display = 'inline-block';
+      } else {
+        if (btn) btn.classList.remove('active');
+        if (pulseBadge) pulseBadge.style.display = 'none';
+      }
+
+      btnBitmask[1] |= (1 << 1);
+      transmitState('Pulse Mode TOGGLE');
+      setTimeout(() => {
+        btnBitmask[1] &= ~(1 << 1);
+        transmitState('Pulse Edge CLEAR');
+      }, 100);
+    }
+
+    allButtons.forEach(btn => {
+      const btnId = parseInt(btn.dataset.btnId, 10);
+      const byteIdx = parseInt(btn.dataset.byte, 10);
+      const bitIdx = parseInt(btn.dataset.bit, 10);
+
+      if (btnId === 5) {
+        btn.addEventListener('pointerdown', (e) => {
+          btn.setPointerCapture(e.pointerId);
+          activateStimulus5(true);
+          e.preventDefault();
+        });
+        const onEnd5 = (e) => {
+          activateStimulus5(false);
+          try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
+        };
+        btn.addEventListener('pointerup', onEnd5);
+        btn.addEventListener('pointercancel', onEnd5);
+      } else if (btnId === 6) {
+        btn.addEventListener('pointerdown', (e) => {
+          btn.setPointerCapture(e.pointerId);
+          activateStimulus6(true);
+          e.preventDefault();
+        });
+        const onEnd6 = (e) => {
+          activateStimulus6(false);
+          try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
+        };
+        btn.addEventListener('pointerup', onEnd6);
+        btn.addEventListener('pointercancel', onEnd6);
+      } else if (btnId === 13) {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          toggleContinuousMode();
+        });
+      } else if (btnId === 12) {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          togglePulseMode();
+        });
+      } else if (btnId === 8) {
+        // CH1 Input Tone (Pure Sine <-> Warble)
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          toggleCh1Tone();
+        });
+      } else if (btnId === 9) {
+        // CH1 Output Transducer (AC -> BC -> FF)
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          cycleCh1Transducer();
+        });
+      } else if (btnId === 14) {
+        // CH2 Input Noise (White Noise <-> NBN)
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          toggleCh2Noise();
+        });
+      } else if (btnId === 15) {
+        // CH2 Output Transducer (Paired with CH1 Out)
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          cycleCh1Transducer();
+        });
+      } else if (btnId === 7) {
+        // Ear Selection (LEFT <-> RIGHT) - belongs strictly to CH1 tones
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          toggleEarSelection();
+        });
+      } else if (btnId === 1) {
+        // Frequency Step Down
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          if (freqIndex > 0) {
+            freqIndex--;
+            document.getElementById('lcdFreqVal').innerHTML = `${FREQUENCIES[freqIndex]}<span class="lcd-param-unit">Hz</span>`;
+            transmitState(`Frequency decreased to ${FREQUENCIES[freqIndex]} Hz`);
+          }
+        });
+      } else if (btnId === 2) {
+        // Frequency Step Up
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          if (freqIndex < FREQUENCIES.length - 1) {
+            freqIndex++;
+            document.getElementById('lcdFreqVal').innerHTML = `${FREQUENCIES[freqIndex]}<span class="lcd-param-unit">Hz</span>`;
+            transmitState(`Frequency increased to ${FREQUENCIES[freqIndex]} Hz`);
+          }
+        });
+      } else {
+        // Generic Momentary Buttons
+        const press = () => {
+          btnBitmask[byteIdx] |= (1 << bitIdx);
+          btn.classList.add('active');
+          transmitState(`Button ${btnId} PRESS`);
+        };
+
+        const release = () => {
+          if (btn.classList.contains('active')) {
+            btnBitmask[byteIdx] &= ~(1 << bitIdx);
+            btn.classList.remove('active');
+            transmitState(`Button ${btnId} RELEASE`);
+          }
+        };
+
+        btn.addEventListener('pointerdown', (e) => {
+          btn.setPointerCapture(e.pointerId);
+          press();
+          e.preventDefault();
+        });
+
+        const onEndGeneric = (e) => {
+          release();
+          try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
+        };
+
+        btn.addEventListener('pointerup', onEndGeneric);
+        btn.addEventListener('pointercancel', onEndGeneric);
+      }
+    });
+
+    /* =========================================================================
+     * SERIAL FRAME BUILDER & TRANSMISSION (WITH QUEUE LOCK)
+     * ========================================================================= */
+    function buildPacket() {
+      const earVal = (activeEar === 'LEFT') ? 0 : 1;
+      const configByte = (ch1ToneMode & 0x01) | ((ch1Transducer & 0x03) << 1) | ((ch2NoiseMode & 0x01) << 3);
+
+      const packet = new Uint8Array(11);
+      packet[0] = 0xAA;                                     // Header
+      packet[1] = btnBitmask[0] & 0xFF;                     // Buttons Byte 0
+      packet[2] = btnBitmask[1] & 0xFF;                     // Buttons Byte 1
+      packet[3] = btnBitmask[2] & 0xFF;                     // Buttons Byte 2
+      packet[4] = (pureToneDb < 0 ? (256 + pureToneDb) : pureToneDb) & 0xFF; // Puretone dB (signed int8)
+      packet[5] = (maskingDb < 0 ? (256 + maskingDb) : maskingDb) & 0xFF;   // Masking dB (signed int8)
+      packet[6] = freqIndex & 0xFF;                         // Frequency Index (0..10 for 125Hz to 8000Hz)
+      packet[7] = earVal & 0xFF;                            // Ear Select (0=LEFT, 1=RIGHT)
+      packet[8] = configByte & 0xFF;                        // Config: Bit 0=CH1 Tone, Bits 1..2=CH1 Transducer, Bit 3=CH2 Noise
+      packet[9] = (packet[1] ^ packet[2] ^ packet[3] ^ packet[4] ^ packet[5] ^ packet[6] ^ packet[7] ^ packet[8]) & 0xFF; // Checksum
+      packet[10] = 0x55;                                    // Footer
+      return packet;
+    }
+
+    function hexString(uint8Arr) {
+      return Array.from(uint8Arr).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+    }
+
+    let isSerialWriting = false;
+    let queuedPacket = null;
+    let queuedReason = '';
+
+    async function transmitState(reason) {
+      const packet = buildPacket();
+      queuedPacket = packet;
+      queuedReason = reason;
+
+      if (isSerialWriting) {
+        return; // Will be sent sequentially as soon as active write completes
+      }
+
+      isSerialWriting = true;
+      while (queuedPacket) {
+        const toSend = queuedPacket;
+        const toReason = queuedReason;
+        queuedPacket = null;
+
+        const hexStr = hexString(toSend);
+        document.getElementById('lastTxHexDisplay').textContent = hexStr;
+        packetCounter++;
+        document.getElementById('lcdPacketCounter').textContent = `TX FRAMES: ${packetCounter}`;
+
+        if (serialWriter) {
+          try {
+            await serialWriter.write(toSend);
+          } catch (err) {
+            console.error("UART Write Error:", err);
+            logEvent("TX ERROR", err.message || "Failed to write UART");
+            break;
+          }
+        }
+        logEvent(hexStr, toReason);
+      }
+      isSerialWriting = false;
+    }
+
+    const transmitStateIfChanged = transmitState;
+
+    function logEvent(hexStr, desc) {
+      const logView = document.getElementById('diagLogView');
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+
+      const row = document.createElement('div');
+      row.className = 'log-row';
+      row.innerHTML = `
+        <span class="log-time">[${timeStr}]</span>
+        <span class="log-hex">${hexStr}</span>
+        <span class="log-desc">&#8594; ${desc}</span>
+      `;
+      logView.prepend(row);
+
+      // Keep maximum 100 log rows
+      while (logView.children.length > 100) {
+        logView.removeChild(logView.lastChild);
+      }
+    }
+
+    document.getElementById('btnClearLog').addEventListener('click', () => {
+      document.getElementById('diagLogView').innerHTML = '';
+    });
+
+    /* =========================================================================
+     * WEB SERIAL API CONNECTION (CH340G)
+     * ========================================================================= */
+    const btnConnect = document.getElementById('btnSerialConnect');
+    const connStatusPill = document.getElementById('connStatusPill');
+    const connStatusText = document.getElementById('connStatusText');
+    const baudSelect = document.getElementById('baudSelect');
+
+    function logRxEvent(hexStr, desc) {
+      const logView = document.getElementById('diagLogView');
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+
+      const row = document.createElement('div');
+      row.className = 'log-row';
+      row.innerHTML = `
+        <span class="log-time">[${timeStr}]</span>
+        <span class="log-hex" style="color: #4ade80;">&#8592; ${hexStr}</span>
+        <span class="log-desc" style="color: #86efac;">${desc}</span>
+      `;
+      logView.prepend(row);
+
+      while (logView.children.length > 100) {
+        logView.removeChild(logView.lastChild);
+      }
+    }
+
+    async function readSerialLoop() {
+      const rxBuffer = [];
+      while (serialPort && serialPort.readable && keepReading) {
+        try {
+          serialReader = serialPort.readable.getReader();
+          while (true) {
+            const { value, done } = await serialReader.read();
+            if (done) break;
+            if (value && value.length > 0) {
+              for (let i = 0; i < value.length; i++) {
+                rxBuffer.push(value[i]);
+              }
+              /* Parse 4-byte response frames: 0xAA, TYPE, DATA, 0x55 */
+              while (rxBuffer.length >= 4) {
+                if (rxBuffer[0] !== 0xAA) {
+                  rxBuffer.shift();
+                  continue;
+                }
+                if (rxBuffer[3] === 0x55) {
+                  const type = rxBuffer[1];
+                  const data = rxBuffer[2];
+                  if (type === 0x06) {
+                    /* MCU ACK Frame */
+                    const hexStr = `AA 06 ${data.toString(16).padStart(2, '0').toUpperCase()} 55`;
+                    logRxEvent(hexStr, 'MCU ACK Received (Frame Processed)');
+                    const ackEl = document.getElementById('lcdAckStatus');
+                    if (ackEl) {
+                      ackEl.textContent = 'ACK: OK';
+                      ackEl.style.color = '#4ade80';
+                    }
+                  } else if (type === 0x50) {
+                    /* Patient Response Switch Event */
+                    const pressed = (data === 0x01);
+                    const hexStr = `AA 50 ${data.toString(16).padStart(2, '0').toUpperCase()} 55`;
+                    logRxEvent(hexStr, `Patient Switch: ${pressed ? 'PRESSED' : 'RELEASED'}`);
+                    const badge = document.getElementById('lcdPatientBadge');
+                    if (badge) badge.style.display = pressed ? 'inline-block' : 'none';
+                  }
+                  rxBuffer.splice(0, 4);
+                } else {
+                  rxBuffer.shift();
+                }
+              }
+            }
+          }
+        } catch (err) {
+          if (keepReading) console.warn("Serial RX read error:", err);
+        } finally {
+          if (serialReader) {
+            try { serialReader.releaseLock(); } catch (_) {}
+            serialReader = null;
+          }
+        }
+      }
+    }
+
+    async function connectSerial() {
+      if (!("serial" in navigator)) {
+        alert("Web Serial API is not supported in this browser. Please use Google Chrome or Microsoft Edge.");
+        return;
+      }
+
+      try {
+        serialPort = await navigator.serial.requestPort();
+        const baudRate = parseInt(baudSelect.value, 10) || 115200;
+
+        await serialPort.open({ baudRate: baudRate });
+        serialWriter = serialPort.writable.getWriter();
+        isConnected = true;
+        keepReading = true;
+
+        btnConnect.classList.add('connected');
+        btnConnect.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+          Disconnect
+        `;
+        connStatusPill.classList.add('online');
+        connStatusText.textContent = `Connected (${baudRate} baud)`;
+
+        logEvent("[System]", `Serial port opened successfully at ${baudRate} baud.`);
+        readSerialLoop();
+        transmitStateIfChanged('Initial Sync upon connection');
+
+      } catch (err) {
+        console.error("Serial connection failed:", err);
+        if (err.name !== 'NotFoundError') {
+          alert("Error opening serial port: " + err.message);
+        }
+      }
+    }
+
+    async function disconnectSerial() {
+      keepReading = false;
+      try {
+        if (serialReader) {
+          await serialReader.cancel();
+          serialReader = null;
+        }
+        if (serialWriter) {
+          serialWriter.releaseLock();
+          serialWriter = null;
+        }
+        if (serialPort) {
+          await serialPort.close();
+          serialPort = null;
+        }
+      } catch (err) {
+        console.error("Error closing serial:", err);
+      }
+
+      isConnected = false;
+      btnConnect.classList.remove('connected');
+      btnConnect.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="m4.93 4.93 4.24 4.24"/>
+          <path d="m14.83 9.17 4.24-4.24"/>
+          <path d="m14.83 14.83 4.24 4.24"/>
+          <path d="m9.17 14.83-4.24 4.24"/>
+        </svg>
+        Connect Serial
+      `;
+      connStatusPill.classList.remove('online');
+      connStatusText.textContent = 'Offline (Ready)';
+      const ackEl = document.getElementById('lcdAckStatus');
+      if (ackEl) {
+        ackEl.textContent = 'ACK: IDLE';
+        ackEl.style.color = '#38bdf8';
+      }
+      logEvent("[System]", "Serial port closed.");
+    }
+
+    btnConnect.addEventListener('click', () => {
+      if (isConnected) {
+        disconnectSerial();
+      } else {
+        connectSerial();
+      }
+    });
+
+    // Direct LCD Screen Click Handlers for rapid parameter tuning
+    const lcdFreqEl = document.getElementById('lcdFreqVal');
+    if (lcdFreqEl) {
+      lcdFreqEl.style.cursor = 'pointer';
+      lcdFreqEl.title = 'Click to step frequency up';
+      lcdFreqEl.addEventListener('click', () => {
+        freqIndex = (freqIndex + 1) % FREQUENCIES.length;
+        lcdFreqEl.innerHTML = `${FREQUENCIES[freqIndex]}<span class="lcd-param-unit">Hz</span>`;
+        transmitStateIfChanged(`Frequency set to ${FREQUENCIES[freqIndex]} Hz`);
+      });
+    }
+
+    const lcdEarEl = document.getElementById('lcdEarBadge');
+    if (lcdEarEl) {
+      lcdEarEl.style.cursor = 'pointer';
+      lcdEarEl.title = 'Click to switch Ear (LEFT / RIGHT)';
+      lcdEarEl.addEventListener('click', () => {
+        toggleEarSelection();
+      });
+    }
+
+    const lcdCh1ToneEl = document.getElementById('lcdCh1ToneBadge');
+    if (lcdCh1ToneEl) {
+      lcdCh1ToneEl.style.cursor = 'pointer';
+      lcdCh1ToneEl.title = 'Click to toggle CH1 Tone (Pure Sine / Warble)';
+      lcdCh1ToneEl.addEventListener('click', () => {
+        toggleCh1Tone();
+      });
+    }
+
+    const lcdCh2El = document.getElementById('lcdCh2Badge');
+    if (lcdCh2El) {
+      lcdCh2El.style.cursor = 'pointer';
+      lcdCh2El.title = 'Click to toggle CH2 Noise (White Noise / NBN)';
+      lcdCh2El.addEventListener('click', () => {
+        toggleCh2Noise();
+      });
+    }
+
+    // Initialize display values and routing on startup
+    updateRoutingDisplays();
+    updateEncoderDisplay();
+  </script>
+</body>
+</html>

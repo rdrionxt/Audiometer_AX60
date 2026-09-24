@@ -200,4 +200,50 @@ void SysTick_Handler(void)
 
 /* USER CODE BEGIN 1 */
 
+extern UART_HandleTypeDef huart2;
+extern UART_HandleTypeDef huart3;
+extern void WebUI_UartRxByte(uint8_t byte);
+
+/**
+  * @brief This function handles USART2 global interrupt for WebUI serial protocol.
+  */
+void USART2_IRQHandler(void)
+{
+  uint32_t sr = huart2.Instance->SR;
+  if (sr & (USART_SR_RXNE | USART_SR_ORE))
+  {
+    uint8_t ch = (uint8_t)(huart2.Instance->DR & 0xFF);
+    if (sr & USART_SR_RXNE)
+    {
+      WebUI_UartRxByte(ch);
+    }
+  }
+}
+
+/**
+  * @brief This function handles USART3 global interrupt for WebUI serial protocol.
+  */
+void USART3_IRQHandler(void)
+{
+  uint32_t sr = huart3.Instance->SR;
+  if (sr & (USART_SR_RXNE | USART_SR_ORE))
+  {
+    uint8_t ch = (uint8_t)(huart3.Instance->DR & 0xFF);
+    if (sr & USART_SR_RXNE)
+    {
+      WebUI_UartRxByte(ch);
+    }
+  }
+}
+
+extern void Audio_I2S_ISR_Handler(void);
+
+/**
+  * @brief This function handles SPI1 / I2S1 global interrupt for continuous real-time audio DAC streaming.
+  */
+void SPI1_IRQHandler(void)
+{
+  Audio_I2S_ISR_Handler();
+}
+
 /* USER CODE END 1 */

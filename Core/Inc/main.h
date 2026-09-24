@@ -101,6 +101,13 @@ typedef struct {
 void Error_Handler(void);
 void PeriphCommonClock_Config(void);
 void MX_SAI1_Init(void);
+void MX_I2S1_Init(void);
+void MX_USART2_UART_Init(void);
+void MX_USART3_UART_Init(void);
+
+extern I2S_HandleTypeDef hi2s1;
+extern UART_HandleTypeDef huart2;
+extern UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN EFP */
 void Audio_Select_Microphone(MicSelection_t mic);
@@ -109,30 +116,41 @@ void Audio_Set_Gain_dB(float gain_db);
 float Audio_Get_Gain_dB(void);
 void Process_Mic_To_DAC(int32_t *pSrc, int32_t *pDst, uint16_t length, float gain);
 
-/* Tone & Noise Generation APIs (SAI Protocol) */
+/* Tone & Noise Generation APIs (Hardware I2S1 Protocol - PA4/PA5/PA7) */
 void Audio_Channel_Init(ChannelState *ch, int mode, float freq_hz, uint32_t seed);
 int16_t Audio_Process_Channel(ChannelState *ch);
-void Audio_Generate_Sample_Pair_SAI(ChannelState *ch_stim, ChannelState *ch_mask,
-                                    float stim_env, float mask_env, uint8_t active_ear,
-                                    int16_t *out_left, int16_t *out_right);
-HAL_StatusTypeDef Audio_Play_Tone_SAI(float freq_hz, uint32_t duration_ms,
+HAL_StatusTypeDef Play_SineWave_I2S(float freq_left_hz, float freq_right_hz, uint32_t duration_ms, float volume_left, float volume_right);
+HAL_StatusTypeDef Audio_Play_Tone_I2S(float freq_hz, uint32_t duration_ms,
                                       int stim_mode, int mask_mode,
                                       float vol_stim, float vol_mask,
                                       uint8_t ear);
-HAL_StatusTypeDef Audio_Play_PureTone_SAI(float freq_hz, uint32_t duration_ms, float volume, uint8_t ear);
-HAL_StatusTypeDef Audio_Play_Warble_SAI(float freq_hz, uint32_t duration_ms, float volume, uint8_t ear);
-HAL_StatusTypeDef Audio_Play_NBN_SAI(float freq_hz, uint32_t duration_ms, float volume, uint8_t ear);
-HAL_StatusTypeDef Audio_Play_WhiteNoise_SAI(uint32_t duration_ms, float volume, uint8_t ear);
+HAL_StatusTypeDef Audio_Play_PureTone_I2S(float freq_hz, uint32_t duration_ms, float volume, uint8_t ear);
+HAL_StatusTypeDef Audio_Play_Warble_I2S(float freq_hz, uint32_t duration_ms, float volume, uint8_t ear);
+HAL_StatusTypeDef Audio_Play_NBN_I2S(float freq_hz, uint32_t duration_ms, float volume, uint8_t ear);
+HAL_StatusTypeDef Audio_Play_WhiteNoise_I2S(uint32_t duration_ms, float volume, uint8_t ear);
 
 /* PGA2311 Volume Control */
 void PGA2311_SetVolume(uint8_t left_gain, uint8_t right_gain);
+
+/* WebUI Serial Protocol Handling */
+void WebUI_UartRxByte(uint8_t byte);
+void WebUI_Poll(void);
+void Audio_I2S_ISR_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
 
 /* USER CODE BEGIN Private defines */
 
-/* SAI PCM5102 DAC Pins (PE2=MCLK, PE5=SCK, PD11=FS, PD12=DIN) */
+/* Hardware I2S1 PCM5102 DAC Pins (PA4=LRCK, PA5=BCK, PA7=DIN) */
+#define I2S_LRCK_Pin               GPIO_PIN_4
+#define I2S_LRCK_GPIO_Port         GPIOA
+#define I2S_BCK_Pin                GPIO_PIN_5
+#define I2S_BCK_GPIO_Port          GPIOA
+#define I2S_DIN_Pin                GPIO_PIN_7
+#define I2S_DIN_GPIO_Port          GPIOA
+
+/* SAI PCM5102 DAC Pins (Alternate provision) */
 #define SAI_PCM5102_MCLK_Pin       GPIO_PIN_2
 #define SAI_PCM5102_MCLK_GPIO_Port GPIOE
 #define SAI_PCM5102_SCK_Pin        GPIO_PIN_5
