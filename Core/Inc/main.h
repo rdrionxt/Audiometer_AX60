@@ -163,8 +163,10 @@ void Audio_I2S_ISR_Handler(void);
 /* Audio Routing & Output Enables */
 #define BC_EN_Pin                 GPIO_PIN_7
 #define BC_EN_GPIO_Port           GPIOE
-#define WN_EN_Pin                 GPIO_PIN_8
-#define WN_EN_GPIO_Port           GPIOE
+#define MH_EN_Pin                 GPIO_PIN_8
+#define MH_EN_GPIO_Port           GPIOE
+#define WN_EN_Pin                 MH_EN_Pin
+#define WN_EN_GPIO_Port           MH_EN_GPIO_Port
 #define FF_EN_Pin                 GPIO_PIN_9
 #define FF_EN_GPIO_Port           GPIOE
 #define BC_L_R_EN_Pin             GPIO_PIN_10

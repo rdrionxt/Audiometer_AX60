@@ -23,6 +23,11 @@
 /* USER CODE BEGIN Includes */
 #include <math.h>
 #include <string.h>
+#include "ds1302.h"
+#include "fram.h"
+#include "sd_card.h"
+#include "usb_device.h"
+#include "usbd_cdc_if.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,6 +51,7 @@ SAI_HandleTypeDef hsai_BlockA1;
 SAI_HandleTypeDef hsai_BlockA2;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
+SPI_HandleTypeDef hspi3;
 
 /* USER CODE BEGIN PV */
 int32_t rx_audio_buf[AUDIO_BUFFER_SIZE];
@@ -58,6 +64,12 @@ volatile uint8_t switch_mute_frames = 0;       /* Anti-pop transient mute counte
 /* Tone Generation DSP Channel States */
 ChannelState ch_stim;
 ChannelState ch_mask;
+
+/* Storage & RTC Diagnostic States */
+volatile uint8_t ds1302_ok = 0;
+volatile uint8_t fram_ok = 0;
+volatile uint8_t sd_ok = 0;
+DS1302_DateTime_t current_time;
 
 /* Standard Audiometric Test Frequencies in Hz */
 const float AUDIOMETER_FREQUENCIES_HZ[11] = {
@@ -85,6 +97,9 @@ typedef struct {
   uint8_t stim1_pressed;     /* 1 = Stimulus 1 button pressed */
   uint8_t stim2_pressed;     /* 1 = Stimulus 2 button pressed */
   uint8_t talk_over_active;  /* 1 = Talk Over active */
+  uint8_t talk_over_ext;     /* 0 = Internal Mic, 1 = External Talkover Mic */
+  uint8_t talk_back_active;  /* 1 = Talk Back active */
+  uint8_t aux_active;        /* 1 = AUX Input active */
 } WebUI_State_t;
 
 static WebUI_State_t audiometer_state = {
@@ -99,7 +114,10 @@ static WebUI_State_t audiometer_state = {
   .pulse_active = 0,
   .stim1_pressed = 0,        /* Muted until WebUI stimulus */
   .stim2_pressed = 0,        /* Muted until WebUI stimulus */
-  .talk_over_active = 0
+  .talk_over_active = 0,
+  .talk_over_ext = 0,
+  .talk_back_active = 0,
+  .aux_active = 0
 };
 
 static uint8_t last_buttons[3] = {0, 0, 0};
@@ -184,6 +202,7 @@ void MX_SAI1_Init(void);
 void MX_SAI2_Init(void);
 void MX_USART2_UART_Init(void);
 void MX_USART3_UART_Init(void);
+static void MX_SPI3_Init(void);
 /* USER CODE BEGIN PFP */
 void WebUI_UpdateAudioSettings(void);
 void WebUI_Poll(void);
@@ -224,6 +243,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_SPI3_Init();
   MX_I2S1_Init();
   MX_SAI1_Init();
   MX_SAI2_Init();
@@ -231,29 +251,36 @@ int main(void)
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  /* 1. Turn on ALL transducers & outputs (AC Left/Right, Insert Earphone, Bone Conductor, Free Field) */
-  HAL_GPIO_WritePin(GPIOE, BC_EN_Pin | WN_EN_Pin | FF_EN_Pin | BC_L_R_EN_Pin | INSERT_EP_EN_Pin | AC_Left_EN_Pin | AC_Right_EN_Pin, GPIO_PIN_SET);
+  /* 0. Initialize Storage & RTC peripherals */
+  ds1302_ok = (DS1302_Init() == 0);
+  fram_ok   = (FRAM_Test() == FRAM_OK);
+  sd_ok     = (SD_Init() == SD_OK);
+
+  /* Initialize USB FS Device (Composite CDC + MSC) */
+  MX_USB_DEVICE_Init();
+
+  /* 1. Turn on default transducers (AC Left/Right, Insert Earphone, Bone Conductor, Free Field) */
+  HAL_GPIO_WritePin(GPIOE, BC_EN_Pin | FF_EN_Pin | BC_L_R_EN_Pin | INSERT_EP_EN_Pin | AC_Left_EN_Pin | AC_Right_EN_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(INTERNAL_SPK_EN_GPIO_Port, INTERNAL_SPK_EN_Pin, GPIO_PIN_SET);
 
-
-
-  /* 3. Enable OPA headphone amplifier (PB2) */
+  /* 2. Enable OPA headphone amplifier (PB2) */
   HAL_GPIO_WritePin(OPA_EN_GPIO_Port, OPA_EN_Pin, GPIO_PIN_SET);
 
-  /* 4. Select PCM DAC mode (PA9 = LOW) */
+  /* 3. Select PCM DAC mode (PA9 = LOW) */
   HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
 
-  /* 5. Hardware reset & unmute sequence for PGA2311 (PB13 = MUTE, PB14 = ZCEN) */
+  /* 4. Hardware reset & unmute sequence for PGA2311 (PB13 = MUTE, PB14 = ZCEN) */
   HAL_GPIO_WritePin(PGA_MUTE_1_GPIO_Port, PGA_MUTE_1_Pin, GPIO_PIN_RESET);
   HAL_Delay(50);
   HAL_GPIO_WritePin(PGA_MUTE_1_GPIO_Port, PGA_MUTE_1_Pin, GPIO_PIN_SET);
   HAL_Delay(50);
   HAL_GPIO_WritePin(ZCEN_GPIO_Port, ZCEN_Pin, GPIO_PIN_RESET);
 
-  /* 6. Configure initial audio state and PGA2311 volume (1000 Hz, 90 dB HL) */
+  /* 5. Configure initial audio state and PGA2311 volume (1000 Hz, 90 dB HL) */
   WebUI_UpdateAudioSettings();
 
-  /* 7. Enable Hardware I2S1 Master Transmitter and TXE interrupt */
+  /* 6. Enable Hardware I2S1 Master Transmitter and TXE interrupt */
   __HAL_I2S_ENABLE(&hi2s1);
   __HAL_I2S_ENABLE_IT(&hi2s1, I2S_IT_TXE);
 
@@ -269,6 +296,26 @@ int main(void)
     /* 2. Determine target digital envelopes */
     uint8_t stim_active = (audiometer_state.cont_active || audiometer_state.stim1_pressed);
     uint8_t mask_active = ((audiometer_state.masking_db > -10) && (audiometer_state.cont_active || audiometer_state.stim2_pressed));
+
+    /* Tone vs Mic/Aux Priority: If tone presenting, PA9 is LOW; else if Mic/Aux active, PA9 is HIGH */
+    uint8_t tone_presenting = (stim_active || mask_active);
+    static uint8_t last_tone_presenting = 0xFF;
+    if (tone_presenting != last_tone_presenting)
+    {
+      last_tone_presenting = tone_presenting;
+      if (tone_presenting)
+      {
+        HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
+      }
+      else if (audiometer_state.talk_over_active || audiometer_state.talk_back_active || audiometer_state.aux_active)
+      {
+        HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_SET);
+      }
+      else
+      {
+        HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
+      }
+    }
 
     float target_stim = stim_active ? 0.8f : 0.0f;
     float target_mask = mask_active ? 0.8f : 0.0f;
@@ -674,9 +721,58 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(PAT_RESPONSE_SW_GPIO_Port, &GPIO_InitStruct);
+
+  /* Configure SPI3 Pins: PC10 (SCK), PC11 (MISO with Pull-Up), PB5 (MOSI) */
+  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  GPIO_InitStruct.Pin = GPIO_PIN_11;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+  * @brief SPI3 Initialization Function for FRAM (FM25CL64B) and SD Card
+  * @param None
+  * @retval None
+  */
+static void MX_SPI3_Init(void)
+{
+  __HAL_RCC_SPI3_CLK_ENABLE();
+
+  hspi3.Instance = SPI3;
+  hspi3.Init.Mode = SPI_MODE_MASTER;
+  hspi3.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi3.Init.NSS = SPI_NSS_SOFT;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
+  hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi3.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
 
 /**
   * @brief USART2 Initialization Function (Configured for CH340G USB UART at 115200 8N1)
@@ -741,6 +837,9 @@ static void Uart_Send_Response(const uint8_t *data, uint16_t len)
     while (!(huart3.Instance->SR & USART_SR_TXE) && --to3);
     huart3.Instance->DR = data[i];
   }
+
+  /* Transmit over USB CDC Virtual COM port */
+  CDC_Transmit_FS((uint8_t *)data, len);
 }
 
 /**
@@ -888,6 +987,62 @@ void WebUI_UpdateAudioSettings(void)
 
   /* 4. Switch physical transducer relays based on selected OUT and Ear */
   Hardware_Update_Audio_Path(audiometer_state.ch1_transducer, audiometer_state.ear_sel);
+
+  /* 5. Microphone, Talkover, Talkback, and AUX routing */
+  if (audiometer_state.talk_over_active)
+  {
+    if (audiometer_state.talk_over_ext)
+    {
+      /* External Talkover Mic: TALKOVER_EN = HIGH, MIC_EN = LOW, MIC_AUX_EN = LOW */
+      HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_SET);
+    }
+    else
+    {
+      /* Internal Talkover Mic: TALKOVER_EN = LOW, MIC_EN = LOW, MIC_AUX_EN = LOW */
+      HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
+    }
+    HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_RESET);
+  }
+  else if (audiometer_state.talk_back_active)
+  {
+    /* Talkback: MIC_EN = HIGH, MIC_AUX_EN = LOW, TALKOVER_EN = LOW, Monitor Headphone (MH_EN) = HIGH */
+    HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_SET);
+  }
+  else if (audiometer_state.aux_active)
+  {
+    /* AUX input: MIC_AUX_EN = HIGH, TALKOVER_EN = LOW, MIC_EN = LOW, MH_EN = LOW */
+    HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_RESET);
+  }
+  else
+  {
+    /* Standby: all routing controls LOW */
+    HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_RESET);
+  }
+
+  /* 6. PCM / Mic Control Pin (PA9): LOW when tone presenting, HIGH when Mic/Aux active and no tone */
+  if (stim_presenting || mask_presenting)
+  {
+    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
+  }
+  else if (audiometer_state.talk_over_active || audiometer_state.talk_back_active || audiometer_state.aux_active)
+  {
+    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_SET);
+  }
+  else
+  {
+    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
+  }
 }
 
 /**
@@ -947,17 +1102,20 @@ void WebUI_Poll(void)
           audiometer_state.freq_idx = (temp[6] <= 10) ? temp[6] : 4;
           audiometer_state.ear_sel = (temp[7] == 0) ? AUDIO_EAR_LEFT : AUDIO_EAR_RIGHT;
 
-          /* Config byte: Bit 0 = CH1 Tone, Bits 1..2 = CH1 Transducer, Bit 3 = CH2 Noise */
+          /* Config byte: Bit 0 = CH1 Tone, Bits 1..2 = CH1 Transducer, Bit 3 = CH2 Noise, Bit 4 = Talkover Mic, Bit 5 = AUX */
           uint8_t cfg = temp[8];
           audiometer_state.ch1_tone       = (cfg & 0x01) ? TONE_MODE_WARBLE : TONE_MODE_SINE;
           audiometer_state.ch1_transducer = (cfg >> 1) & 0x03; /* 0=AC, 1=BC, 2=FF */
           audiometer_state.ch2_noise      = (cfg & (1 << 3)) ? TONE_MODE_NBN : TONE_MODE_WHITE_NOISE;
+          audiometer_state.talk_over_ext  = (cfg & (1 << 4)) ? 1 : 0;
+          audiometer_state.aux_active     = (cfg & (1 << 5)) ? 1 : 0;
 
           audiometer_state.stim1_pressed = (b0 & (1 << 2)) ? 1 : 0;
           audiometer_state.stim2_pressed = (b0 & (1 << 3)) ? 1 : 0;
           audiometer_state.cont_active   = (b1 & (1 << 2)) ? 1 : 0;
           audiometer_state.pulse_active  = (b1 & (1 << 1)) ? 1 : 0;
           audiometer_state.talk_over_active = (b2 & (1 << 4)) ? 1 : 0;
+          audiometer_state.talk_back_active = (b2 & (1 << 5)) ? 1 : 0;
 
           last_buttons[0] = b0;
           last_buttons[1] = b1;
@@ -1019,6 +1177,7 @@ void WebUI_Poll(void)
           audiometer_state.cont_active   = (b1 & (1 << 2)) ? 1 : 0;
           audiometer_state.pulse_active  = (b1 & (1 << 1)) ? 1 : 0;
           audiometer_state.talk_over_active = (b2 & (1 << 4)) ? 1 : 0;
+          audiometer_state.talk_back_active = (b2 & (1 << 5)) ? 1 : 0;
 
           last_buttons[0] = b0;
           last_buttons[1] = b1;

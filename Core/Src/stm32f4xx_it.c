@@ -246,4 +246,14 @@ void SPI1_IRQHandler(void)
   Audio_I2S_ISR_Handler();
 }
 
+extern PCD_HandleTypeDef hpcd_USB_OTG_FS;
+
+/**
+  * @brief This function handles USB On-The-Go FS global interrupt.
+  */
+void OTG_FS_IRQHandler(void)
+{
+  HAL_PCD_IRQHandler(&hpcd_USB_OTG_FS);
+}
+
 /* USER CODE END 1 */

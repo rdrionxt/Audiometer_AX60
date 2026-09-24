@@ -356,6 +356,84 @@
       to { opacity: 1; transform: scale(1.05); }
     }
 
+    /* Hardware Patient Response LED Indicator */
+    .patient-led-container {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 6px 14px;
+      margin-bottom: 12px;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.2);
+      user-select: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .patient-led-container:hover {
+      border-color: #475569;
+    }
+
+    .patient-led-bezel {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #94a3b8 0%, #475569 60%, #1e293b 100%);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4), inset 0 1px 1px #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .patient-led-bulb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #15803d 0%, #052e16 80%);
+      border: 1px solid #14532d;
+      box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.2);
+      transition: all 0.12s ease;
+    }
+
+    .patient-led-bulb.active {
+      background: radial-gradient(circle at 35% 35%, #86efac 0%, #22c55e 50%, #16a34a 100%);
+      border-color: #4ade80;
+      box-shadow: 0 0 14px #22c55e, 0 0 26px #4ade80, inset 0 2px 4px #ffffff;
+      animation: ledPulse 0.8s infinite alternate;
+    }
+
+    @keyframes ledPulse {
+      from { filter: brightness(1); }
+      to { filter: brightness(1.25); }
+    }
+
+    .patient-led-label-wrap {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.2;
+    }
+
+    .patient-led-title {
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      color: #cbd5e1;
+    }
+
+    .patient-led-state {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #64748b;
+      transition: color 0.15s ease;
+    }
+
+    .patient-led-state.active {
+      color: #4ade80;
+      text-shadow: 0 0 8px rgba(74, 222, 128, 0.6);
+    }
+
     .lcd-body-grid {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
@@ -466,6 +544,31 @@
       font-size: 0.8rem;
       font-weight: 600;
       color: #64748b;
+    }
+
+    .btn-subtoggle {
+      margin-top: 4px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: #e2e8f0;
+      border: 1px solid #94a3b8;
+      color: #1e293b;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    .btn-subtoggle:hover {
+      filter: brightness(1.05);
+    }
+
+    .btn-subtoggle.ext {
+      background: #0284c7;
+      color: #ffffff;
+      border-color: #0369a1;
+      box-shadow: 0 1px 4px rgba(2, 132, 199, 0.4);
     }
 
     /* Bottom Section: Encoders & Stimulus & Freq */
@@ -878,6 +981,17 @@
 
       <!-- Center LCD Screen Display -->
       <div class="lcd-display-container">
+        <!-- Hardware Patient Response LED Indicator -->
+        <div class="patient-led-container" title="Patient Response Switch Indicator (Click to toggle/simulate)">
+          <div class="patient-led-bezel">
+            <div class="patient-led-bulb" id="patientLed"></div>
+          </div>
+          <div class="patient-led-label-wrap">
+            <span class="patient-led-title">PATIENT RESPONSE SWITCH</span>
+            <span class="patient-led-state" id="patientLedState">STANDBY / IDLE</span>
+          </div>
+        </div>
+
         <div class="lcd-screen">
           <div class="lcd-header">
             <div class="lcd-title">AX60 AUDIOMETER SYSTEM</div>
@@ -888,6 +1002,9 @@
               <span class="lcd-badge" id="lcdPulseBadge" style="display:none; background:#d97706; color:#fff; font-weight:bold;">PULSE</span>
               <span class="lcd-badge" id="lcdContBadge" style="display:none; background:#7c3aed; color:#fff; font-weight:bold;">CONT</span>
               <span class="lcd-badge patient-badge" id="lcdPatientBadge" style="display:none;">PATIENT RESP</span>
+              <span class="lcd-badge" id="lcdTalkOverBadge" style="display:none; background:#0284c7; color:#fff; font-weight:bold;">TALKOVER (INT MIC)</span>
+              <span class="lcd-badge" id="lcdTalkBackBadge" style="display:none; background:#059669; color:#fff; font-weight:bold;">TALKBACK (MH ON)</span>
+              <span class="lcd-badge" id="lcdAuxBadge" style="display:none; background:#d97706; color:#fff; font-weight:bold;">AUX IN</span>
             </div>
           </div>
 
@@ -995,14 +1112,21 @@
 
       <div class="btn-capsule-item">
         <span class="capsule-label">Talk Over</span>
-        <button class="btn-capsule" data-btn-id="23" data-byte="2" data-bit="4"></button>
+        <button class="btn-capsule" data-btn-id="23" data-byte="2" data-bit="4" id="btnTalkOver" title="Toggle Talkover">23</button>
         <span class="capsule-num">23</span>
+        <button class="btn-subtoggle" id="btnTalkOverMic" title="Click to switch Talkover Mic Source (Internal / External)">INT MIC</button>
       </div>
 
       <div class="btn-capsule-item">
         <span class="capsule-label">Talk Back</span>
-        <button class="btn-capsule" data-btn-id="24" data-byte="2" data-bit="5"></button>
-        <span class="capsule-num">24</span>
+        <button class="btn-capsule" data-btn-id="24" data-byte="2" data-bit="5" id="btnTalkBack" title="Toggle Talkback (Monitor Headphone)">24</button>
+        <span class="capsule-num">24 (MH)</span>
+      </div>
+
+      <div class="btn-capsule-item">
+        <span class="capsule-label">AUX Input</span>
+        <button class="btn-capsule" id="btnAux" title="Toggle AUX Input (MIC/AUX EN)">AUX</button>
+        <span class="capsule-num">IN</span>
       </div>
 
       <div class="btn-capsule-item">
@@ -1233,6 +1357,10 @@
     let packetCounter = 0;
     let pulseActive = false;
     let contActive = false; /* Continuous tone idle by default */
+    let talkOverActive = false;
+    let talkOverExtMic = false; /* false = Internal Mic (0), true = External Mic (1) */
+    let talkBackActive = false;
+    let auxActive = false;
 
     /* Generate radial tick marks for encoders */
     function renderDialTicks(groupId) {
@@ -1491,6 +1619,73 @@
       }, 100);
     }
 
+    function toggleTalkOver() {
+      talkOverActive = !talkOverActive;
+      const btn = document.getElementById('btnTalkOver');
+      const badge = document.getElementById('lcdTalkOverBadge');
+      if (talkOverActive) {
+        btnBitmask[2] |= (1 << 4);
+        if (btn) btn.classList.add('active');
+        if (badge) {
+          badge.style.display = 'inline-block';
+          badge.textContent = talkOverExtMic ? 'TALKOVER (EXT MIC)' : 'TALKOVER (INT MIC)';
+        }
+      } else {
+        btnBitmask[2] &= ~(1 << 4);
+        if (btn) btn.classList.remove('active');
+        if (badge) badge.style.display = 'none';
+      }
+      transmitState(`Talk Over ${talkOverActive ? 'ON' : 'OFF'} (${talkOverExtMic ? 'Ext Mic' : 'Int Mic'})`);
+    }
+
+    function toggleTalkOverMic() {
+      talkOverExtMic = !talkOverExtMic;
+      const btnMic = document.getElementById('btnTalkOverMic');
+      const badge = document.getElementById('lcdTalkOverBadge');
+      if (btnMic) {
+        btnMic.textContent = talkOverExtMic ? 'EXT MIC' : 'INT MIC';
+        if (talkOverExtMic) {
+          btnMic.classList.add('ext');
+        } else {
+          btnMic.classList.remove('ext');
+        }
+      }
+      if (talkOverActive && badge) {
+        badge.textContent = talkOverExtMic ? 'TALKOVER (EXT MIC)' : 'TALKOVER (INT MIC)';
+      }
+      transmitState(`Talkover Mic set to ${talkOverExtMic ? 'External' : 'Internal'}`);
+    }
+
+    function toggleTalkBack() {
+      talkBackActive = !talkBackActive;
+      const btn = document.getElementById('btnTalkBack');
+      const badge = document.getElementById('lcdTalkBackBadge');
+      if (talkBackActive) {
+        btnBitmask[2] |= (1 << 5);
+        if (btn) btn.classList.add('active');
+        if (badge) badge.style.display = 'inline-block';
+      } else {
+        btnBitmask[2] &= ~(1 << 5);
+        if (btn) btn.classList.remove('active');
+        if (badge) badge.style.display = 'none';
+      }
+      transmitState(`Talk Back ${talkBackActive ? 'ON' : 'OFF'} (Monitor Headphone ${talkBackActive ? 'ACTIVE' : 'OFF'})`);
+    }
+
+    function toggleAux() {
+      auxActive = !auxActive;
+      const btn = document.getElementById('btnAux');
+      const badge = document.getElementById('lcdAuxBadge');
+      if (auxActive) {
+        if (btn) btn.classList.add('active');
+        if (badge) badge.style.display = 'inline-block';
+      } else {
+        if (btn) btn.classList.remove('active');
+        if (badge) badge.style.display = 'none';
+      }
+      transmitState(`AUX Input ${auxActive ? 'ON' : 'OFF'}`);
+    }
+
     allButtons.forEach(btn => {
       const btnId = parseInt(btn.dataset.btnId, 10);
       const byteIdx = parseInt(btn.dataset.byte, 10);
@@ -1580,6 +1775,18 @@
             transmitState(`Frequency increased to ${FREQUENCIES[freqIndex]} Hz`);
           }
         });
+      } else if (btnId === 23) {
+        // Talk Over Toggle
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          toggleTalkOver();
+        });
+      } else if (btnId === 24) {
+        // Talk Back Toggle
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          toggleTalkBack();
+        });
       } else {
         // Generic Momentary Buttons
         const press = () => {
@@ -1612,12 +1819,34 @@
       }
     });
 
+    // Sub-toggle button for Talkover Mic Source (Internal / External)
+    const btnTalkOverMicEl = document.getElementById('btnTalkOverMic');
+    if (btnTalkOverMicEl) {
+      btnTalkOverMicEl.addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleTalkOverMic();
+      });
+    }
+
+    // AUX Input Button
+    const btnAuxEl = document.getElementById('btnAux');
+    if (btnAuxEl) {
+      btnAuxEl.addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleAux();
+      });
+    }
+
     /* =========================================================================
      * SERIAL FRAME BUILDER & TRANSMISSION (WITH QUEUE LOCK)
      * ========================================================================= */
     function buildPacket() {
       const earVal = (activeEar === 'LEFT') ? 0 : 1;
-      const configByte = (ch1ToneMode & 0x01) | ((ch1Transducer & 0x03) << 1) | ((ch2NoiseMode & 0x01) << 3);
+      const configByte = (ch1ToneMode & 0x01) |
+                         ((ch1Transducer & 0x03) << 1) |
+                         ((ch2NoiseMode & 0x01) << 3) |
+                         ((talkOverExtMic ? 1 : 0) << 4) |
+                         ((auxActive ? 1 : 0) << 5);
 
       const packet = new Uint8Array(11);
       packet[0] = 0xAA;                                     // Header
@@ -1628,7 +1857,7 @@
       packet[5] = (maskingDb < 0 ? (256 + maskingDb) : maskingDb) & 0xFF;   // Masking dB (signed int8)
       packet[6] = freqIndex & 0xFF;                         // Frequency Index (0..10 for 125Hz to 8000Hz)
       packet[7] = earVal & 0xFF;                            // Ear Select (0=LEFT, 1=RIGHT)
-      packet[8] = configByte & 0xFF;                        // Config: Bit 0=CH1 Tone, Bits 1..2=CH1 Transducer, Bit 3=CH2 Noise
+      packet[8] = configByte & 0xFF;                        // Config: Bit 0=CH1 Tone, Bits 1..2=CH1 Transducer, Bit 3=CH2 Noise, Bit 4=Talkover Mic, Bit 5=AUX
       packet[9] = (packet[1] ^ packet[2] ^ packet[3] ^ packet[4] ^ packet[5] ^ packet[6] ^ packet[7] ^ packet[8]) & 0xFF; // Checksum
       packet[10] = 0x55;                                    // Footer
       return packet;
@@ -1766,6 +1995,21 @@
                     logRxEvent(hexStr, `Patient Switch: ${pressed ? 'PRESSED' : 'RELEASED'}`);
                     const badge = document.getElementById('lcdPatientBadge');
                     if (badge) badge.style.display = pressed ? 'inline-block' : 'none';
+                    const led = document.getElementById('patientLed');
+                    const ledState = document.getElementById('patientLedState');
+                    if (led) {
+                      if (pressed) led.classList.add('active');
+                      else led.classList.remove('active');
+                    }
+                    if (ledState) {
+                      if (pressed) {
+                        ledState.classList.add('active');
+                        ledState.textContent = 'SWITCH PRESSED (HIGH)';
+                      } else {
+                        ledState.classList.remove('active');
+                        ledState.textContent = 'STANDBY / IDLE';
+                      }
+                    }
                   }
                   rxBuffer.splice(0, 4);
                 } else {
@@ -1908,6 +2152,33 @@
       lcdCh2El.title = 'Click to toggle CH2 Noise (White Noise / NBN)';
       lcdCh2El.addEventListener('click', () => {
         toggleCh2Noise();
+      });
+    }
+
+    // Allow clicking the Patient Response LED in UI to test & simulate patient switch
+    const patientLedBezel = document.querySelector('.patient-led-container');
+    if (patientLedBezel) {
+      let simState = false;
+      patientLedBezel.addEventListener('click', () => {
+        simState = !simState;
+        const led = document.getElementById('patientLed');
+        const ledState = document.getElementById('patientLedState');
+        const badge = document.getElementById('lcdPatientBadge');
+        if (led) {
+          if (simState) led.classList.add('active');
+          else led.classList.remove('active');
+        }
+        if (ledState) {
+          if (simState) {
+            ledState.classList.add('active');
+            ledState.textContent = 'SWITCH PRESSED (HIGH)';
+          } else {
+            ledState.classList.remove('active');
+            ledState.textContent = 'STANDBY / IDLE';
+          }
+        }
+        if (badge) badge.style.display = simState ? 'inline-block' : 'none';
+        logRxEvent(`AA 50 ${simState ? '01' : '00'} 55`, `Simulated Patient Switch: ${simState ? 'PRESSED' : 'RELEASED'}`);
       });
     }
 
