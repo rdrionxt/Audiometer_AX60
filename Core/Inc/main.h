@@ -115,6 +115,8 @@ void MX_USART3_UART_Init(void);
 
 extern I2S_HandleTypeDef hi2s1;
 extern DMA_HandleTypeDef hdma_spi1_tx;
+extern SAI_HandleTypeDef hsai_BlockA1;
+extern DMA_HandleTypeDef hdma_sai1_a;
 extern UART_HandleTypeDef huart2;
 extern UART_HandleTypeDef huart3;
 

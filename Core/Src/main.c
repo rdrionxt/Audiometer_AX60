@@ -139,19 +139,98 @@ static uint32_t pulse_sample_count = 0;
 
 /* Hardware Circular DMA Stereo Audio Buffer for Guaranteed 100% Left/Right Separation */
 DMA_HandleTypeDef hdma_spi1_tx;
+DMA_HandleTypeDef hdma_sai1_a;
 
 #define DMA_AUDIO_HALF_FRAMES  256
 #define DMA_AUDIO_TOTAL_FRAMES (DMA_AUDIO_HALF_FRAMES * 2)   /* 512 stereo frames */
 #define DMA_AUDIO_BUF_SIZE     (DMA_AUDIO_TOTAL_FRAMES * 2)  /* 1024 uint16_t samples (512 Left + 512 Right) */
 
+/* Circular DMA buffer for I2S1 TX (to PCM5102 DAC) */
 static int16_t dma_audio_buffer[DMA_AUDIO_BUF_SIZE] __attribute__((aligned(4)));
+
+/* Circular DMA buffer for SAI1 Block A RX (from PCM1808 ADC) - 32-bit words (24-bit audio in top bits) */
+static uint32_t dma_sai_rx_buffer[DMA_AUDIO_BUF_SIZE] __attribute__((aligned(4)));
 
 /**
   * @brief  Populates half of the circular DMA buffer with interleaved Left and Right audio frames.
-  *         This eliminates CPU underflow, phase slipping, and channel swapping completely.
+  *         Loops back active microphone / AUX ADC data from PCM1808 to PCM5102 DAC, or
+  *         synthesizes audiometric test tones/noises when testing.
   */
-static void Fill_Audio_Buffer_Half(int16_t *dest, uint16_t num_frames)
+static void Fill_Audio_Buffer_Half(int16_t *dest, uint16_t num_frames, uint16_t rx_offset)
 {
+  /* 1. TALKOVER MODE (Examiner -> Patient Headphones):
+   *    If External Mic (talk_over_ext == 1): Read IC1 Right Channel (Mic 2)
+   *    If Internal Mic (talk_over_ext == 0): Read IC2 Left Channel  (Mic 3)
+   */
+  if (audiometer_state.talk_over_active)
+  {
+    uint8_t ch_offset = (audiometer_state.talk_over_ext == 1) ? 1 : 0;
+    for (uint16_t i = 0; i < num_frames; i++)
+    {
+      uint16_t idx = rx_offset + (2 * i) + ch_offset;
+      int32_t raw_sample = (int32_t)dma_sai_rx_buffer[idx];
+      /* Convert 24-bit MSB-aligned in 32-bit slot to signed 16-bit */
+      int16_t mic_sample = (int16_t)(raw_sample >> 16);
+
+      /* Apply digital software gain and clip */
+      int32_t out_val = (int32_t)((float)mic_sample * live_mic_gain);
+      if (out_val > 32767) out_val = 32767;
+      else if (out_val < -32768) out_val = -32768;
+
+      /* Route to both Left and Right patient headphones */
+      dest[2 * i]     = (int16_t)out_val;
+      dest[2 * i + 1] = (int16_t)out_val;
+    }
+    return;
+  }
+
+  /* 2. TALKBACK MODE (Patient Mic -> Examiner Speaker / Headphone):
+   *    Read IC1 Left Channel (Mic 1)
+   */
+  if (audiometer_state.talk_back_active)
+  {
+    for (uint16_t i = 0; i < num_frames; i++)
+    {
+      uint16_t idx = rx_offset + (2 * i); /* Left channel */
+      int32_t raw_sample = (int32_t)dma_sai_rx_buffer[idx];
+      int16_t mic_sample = (int16_t)(raw_sample >> 16);
+
+      int32_t out_val = (int32_t)((float)mic_sample * live_mic_gain);
+      if (out_val > 32767) out_val = 32767;
+      else if (out_val < -32768) out_val = -32768;
+
+      /* Route to examiner monitor channel */
+      dest[2 * i]     = (int16_t)out_val;
+      dest[2 * i + 1] = (int16_t)out_val;
+    }
+    return;
+  }
+
+  /* 3. AUX AUDIO INPUT (External 3.5mm -> Patient Headphones):
+   *    Read IC2 Right Channel (Mic 4)
+   */
+  if (audiometer_state.aux_active)
+  {
+    for (uint16_t i = 0; i < num_frames; i++)
+    {
+      uint16_t idx = rx_offset + (2 * i) + 1; /* Right channel */
+      int32_t raw_sample = (int32_t)dma_sai_rx_buffer[idx];
+      int16_t mic_sample = (int16_t)(raw_sample >> 16);
+
+      int32_t out_val = (int32_t)((float)mic_sample * live_mic_gain);
+      if (out_val > 32767) out_val = 32767;
+      else if (out_val < -32768) out_val = -32768;
+
+      /* Route stereo to patient headphones */
+      dest[2 * i]     = (int16_t)out_val;
+      dest[2 * i + 1] = (int16_t)out_val;
+    }
+    return;
+  }
+
+  /* 4. NORMAL AUDIOMETRY TESTING MODE:
+   *    Pure Tone / Warble Stimulus & Narrowband / White Noise Masking
+   */
   uint8_t stim_active = (audiometer_state.cont_active || audiometer_state.stim1_pressed);
   uint8_t mask_active = ((audiometer_state.masking_db > -10) && (audiometer_state.cont_active || audiometer_state.stim2_pressed));
 
@@ -236,7 +315,7 @@ void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 {
   if (hi2s->Instance == SPI1)
   {
-    Fill_Audio_Buffer_Half(&dma_audio_buffer[0], DMA_AUDIO_HALF_FRAMES);
+    Fill_Audio_Buffer_Half(&dma_audio_buffer[0], DMA_AUDIO_HALF_FRAMES, 0);
   }
 }
 
@@ -247,7 +326,7 @@ void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
 {
   if (hi2s->Instance == SPI1)
   {
-    Fill_Audio_Buffer_Half(&dma_audio_buffer[DMA_AUDIO_BUF_SIZE / 2], DMA_AUDIO_HALF_FRAMES);
+    Fill_Audio_Buffer_Half(&dma_audio_buffer[DMA_AUDIO_BUF_SIZE / 2], DMA_AUDIO_HALF_FRAMES, DMA_AUDIO_BUF_SIZE / 2);
   }
 }
 
@@ -311,6 +390,7 @@ int main(void)
   MX_GPIO_Init();
   MX_SPI3_Init();
   MX_I2S1_Init();
+  MX_SAI1_Init();
   MX_USART2_UART_Init();
   MX_USART3_UART_Init();
   dbg_main_step = 4;
@@ -367,6 +447,10 @@ int main(void)
   /* 6. Start continuous circular DMA stereo audio streaming (100% Left/Right separation) */
   memset(dma_audio_buffer, 0, sizeof(dma_audio_buffer));
   HAL_I2S_Transmit_DMA(&hi2s1, (uint16_t *)dma_audio_buffer, DMA_AUDIO_BUF_SIZE);
+
+  /* 7. Start continuous circular DMA audio capture from PCM1808 via SAI1 Block A */
+  memset(dma_sai_rx_buffer, 0, sizeof(dma_sai_rx_buffer));
+  HAL_SAI_Receive_DMA(&hsai_BlockA1, (uint8_t *)dma_sai_rx_buffer, DMA_AUDIO_BUF_SIZE);
 
   /* USER CODE END 2 */
 
@@ -596,6 +680,20 @@ void MX_I2S1_Init(void)
 
 void MX_SAI1_Init(void)
 {
+  hsai_BlockA1.Instance = SAI1_Block_A;
+  hsai_BlockA1.Init.AudioMode = SAI_MODEMASTER_RX;
+  hsai_BlockA1.Init.Synchro = SAI_ASYNCHRONOUS;
+  hsai_BlockA1.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
+  hsai_BlockA1.Init.NoDivider = SAI_MASTERDIVIDER_ENABLE;
+  hsai_BlockA1.Init.FIFOThreshold = SAI_FIFOTHRESHOLD_EMPTY;
+  hsai_BlockA1.Init.AudioFrequency = SAI_AUDIO_FREQUENCY_48K;
+  hsai_BlockA1.Init.MonoStereoMode = SAI_STEREOMODE;
+  hsai_BlockA1.Init.CompandingMode = SAI_NOCOMPANDING;
+
+  if (HAL_SAI_InitProtocol(&hsai_BlockA1, SAI_I2S_STANDARD, SAI_PROTOCOL_DATASIZE_24BIT, 2) != HAL_OK)
+  {
+    Error_Handler_Ex(__FILE__, __LINE__, 104);
+  }
 }
 
 void MX_SAI2_Init(void)
@@ -960,19 +1058,36 @@ void WebUI_UpdateAudioSettings(void)
   /* Always ensure OPA headphone amplifier is enabled */
   HAL_GPIO_WritePin(OPA_EN_GPIO_Port, OPA_EN_Pin, GPIO_PIN_SET);
 
+  /* ALWAYS keep PCM_MIC_Control (PA9) = LOW so PCM5102 DAC feeds PGA2311 directly! */
+  HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
+
   if (audiometer_state.talk_over_active)
   {
-    /* TALKOVER MODE (Examiner -> Patient):
-     * - Mic selection: External Mic = PD4 HIGH, Internal Mic = PD4 LOW
+    /* TALKOVER MODE (Examiner -> Patient Headphones):
+     * If External Mic (talk_over_ext == 1):
+     *   - Select IC1: PCM1808_DATA_EN (PD10) = HIGH (1) -> Mic 2 (Right Channel)
+     *   - TALKOVER_EN (PD4) = HIGH (1) (External Mic bias/preamp)
+     * If Internal Mic (talk_over_ext == 0):
+     *   - Select IC2: PCM1808_DATA_EN (PD10) = LOW (0) -> Mic 3 (Left Channel)
+     *   - TALKOVER_EN (PD4) = LOW (0) (Internal Mic)
      * - MIC_EN (PD6) = LOW, MIC_AUX_EN (PD5) = LOW
-     * - PCM_MIC_Control (PA9) = HIGH (select analog mic input instead of PCM DAC)
-     * - Patient Relays: AC Left (PE13) and AC Right (PE14) ON; BC (PE7), BC L/R (PE10), Insert (PE12), FF (PE9) OFF
+     * - Patient Relays: AC Left (PE13) and AC Right (PE14) ON; BC (PE7), Insert (PE12), FF (PE9) OFF
      * - Examiner Monitors: MH_EN (PE8) = LOW, INTERNAL_SPK_EN (PA15) = LOW
      */
-    HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, audiometer_state.talk_over_ext ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    if (audiometer_state.talk_over_ext)
+    {
+      HAL_GPIO_WritePin(PCM1808_DATA_EN_GPIO_Port, PCM1808_DATA_EN_Pin, GPIO_PIN_SET);   /* IC1 */
+      HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_SET);           /* External Mic */
+      current_mic_sel = MIC_SEL_MIC2;
+    }
+    else
+    {
+      HAL_GPIO_WritePin(PCM1808_DATA_EN_GPIO_Port, PCM1808_DATA_EN_Pin, GPIO_PIN_RESET); /* IC2 */
+      HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);         /* Internal Mic */
+      current_mic_sel = MIC_SEL_MIC3;
+    }
     HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_SET);
 
     /* Turn ON AC Left & AC Right headphone relays for the patient */
     HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin, GPIO_PIN_SET);
@@ -985,19 +1100,20 @@ void WebUI_UpdateAudioSettings(void)
   }
   else if (audiometer_state.talk_back_active)
   {
-    /* TALKBACK MODE (Patient -> Examiner):
-     * - Patient Mic Enable: MIC_EN (PD6) = HIGH
+    /* TALKBACK MODE (Patient -> Examiner Monitor):
+     * - Select IC1: PCM1808_DATA_EN (PD10) = HIGH (1) -> Mic 1 (Left Channel)
+     * - Patient Mic Pre-Amp Enable: MIC_EN (PD6) = HIGH (1)
      * - TALKOVER_EN (PD4) = LOW, MIC_AUX_EN (PD5) = LOW
-     * - PCM_MIC_Control (PA9) = HIGH (select analog mic input)
-     * - Patient Transducers: Turn OFF AC Left/Right (PE13/14), BC, Insert, FF to avoid acoustic feedback
+     * - Patient Transducers: Turn OFF AC Left/Right, BC, Insert, FF to eliminate feedback
      * - Examiner Output:
      *     If Internal Speaker selected (talk_back_dest == 1): INTERNAL_SPK_EN (PA15) = HIGH, MH_EN (PE8) = LOW
      *     If MH selected (talk_back_dest == 0): MH_EN (PE8) = HIGH, INTERNAL_SPK_EN (PA15) = LOW
      */
+    HAL_GPIO_WritePin(PCM1808_DATA_EN_GPIO_Port, PCM1808_DATA_EN_Pin, GPIO_PIN_SET);   /* IC1 */
     HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_SET);
+    current_mic_sel = MIC_SEL_MIC1;
 
     /* Turn OFF patient headphones/transducers */
     HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin | BC_EN_Pin | INSERT_EP_EN_Pin | FF_EN_Pin, GPIO_PIN_RESET);
@@ -1016,19 +1132,20 @@ void WebUI_UpdateAudioSettings(void)
   }
   else if (audiometer_state.aux_active)
   {
-    /* AUX INPUT MODE:
-     * - Mic selection: MIC_AUX_EN (PD5) = SET
-     * - TALKOVER_EN (PD4) = RESET, MIC_EN (PD6) = RESET
-     * - MH_EN (PE8) = RESET, INTERNAL_SPK_EN (PA15) = RESET
-     * - PCM_MIC_Control (PA9) = SET (select analog auxiliary input mux)
-     * - Patient Relays: ONLY Air Conduction (AC Left & Right) active; BC, Insert, FF disabled
+    /* AUX INPUT MODE (External Line/Mic -> Patient Headphones):
+     * - Select IC2: PCM1808_DATA_EN (PD10) = LOW (0) -> Mic 4 (Right Channel)
+     * - AUX buffer enable: MIC_AUX_EN (PD5) = HIGH (1)
+     * - TALKOVER_EN (PD4) = LOW, MIC_EN (PD6) = LOW
+     * - Patient Relays: AC Left & Right active; BC, Insert, FF disabled
+     * - Examiner Monitors: OFF
      */
+    HAL_GPIO_WritePin(PCM1808_DATA_EN_GPIO_Port, PCM1808_DATA_EN_Pin, GPIO_PIN_RESET); /* IC2 */
+    HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(INTERNAL_SPK_EN_GPIO_Port, INTERNAL_SPK_EN_Pin, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_SET);
+    current_mic_sel = MIC_SEL_MIC4;
 
     /* Turn ON AC Left & AC Right headphone relays only */
     HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin, GPIO_PIN_SET);
@@ -1038,20 +1155,88 @@ void WebUI_UpdateAudioSettings(void)
   else
   {
     /* STANDBY / NORMAL TESTING MODE:
+     * - Default to IC1: PCM1808_DATA_EN (PD10) = HIGH (1)
      * - Mic / Aux control pins RESET
      * - Examiner monitor outputs RESET
-     * - PCM_MIC_Control (PA9) = RESET (LOW for PCM DAC tone synthesis)
      * - Transducer relays follow current UI selection (AC / BC / FF)
      */
+    HAL_GPIO_WritePin(PCM1808_DATA_EN_GPIO_Port, PCM1808_DATA_EN_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(INTERNAL_SPK_EN_GPIO_Port, INTERNAL_SPK_EN_Pin, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
 
     Hardware_Update_Audio_Path(audiometer_state.ch1_transducer, audiometer_state.ear_sel);
   }
+}
+
+/**
+  * @brief  Selects active microphone source, sets ADC IC multiplexer (PD10), and enables corresponding preamp bias.
+  */
+void Audio_Select_Microphone(MicSelection_t mic)
+{
+  current_mic_sel = mic;
+  switch (mic)
+  {
+    case MIC_SEL_MIC1: /* Talkback (Patient Mic) -> IC1 Left */
+      HAL_GPIO_WritePin(PCM1808_DATA_EN_GPIO_Port, PCM1808_DATA_EN_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_RESET);
+      break;
+
+    case MIC_SEL_MIC2: /* Talkover (External Mic) -> IC1 Right */
+      HAL_GPIO_WritePin(PCM1808_DATA_EN_GPIO_Port, PCM1808_DATA_EN_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_RESET);
+      break;
+
+    case MIC_SEL_MIC3: /* Talkover (Internal Mic) -> IC2 Left */
+      HAL_GPIO_WritePin(PCM1808_DATA_EN_GPIO_Port, PCM1808_DATA_EN_Pin, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_RESET);
+      break;
+
+    case MIC_SEL_MIC4: /* AUX Audio Input -> IC2 Right */
+      HAL_GPIO_WritePin(PCM1808_DATA_EN_GPIO_Port, PCM1808_DATA_EN_Pin, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_RESET);
+      break;
+
+    default:
+      break;
+  }
+}
+
+/**
+  * @brief  Sets digital software gain multiplier for microphone loopback (0.0f to 10.0f).
+  */
+void Audio_Set_Gain_Linear(float gain)
+{
+  if (gain < 0.0f) gain = 0.0f;
+  if (gain > 10.0f) gain = 10.0f;
+  live_mic_gain = gain;
+}
+
+/**
+  * @brief  Sets digital software gain in decibels (-60 dB to +20 dB).
+  */
+void Audio_Set_Gain_dB(float gain_db)
+{
+  live_mic_gain = powf(10.0f, gain_db / 20.0f);
+}
+
+/**
+  * @brief  Returns current digital microphone gain in decibels.
+  */
+float Audio_Get_Gain_dB(void)
+{
+  if (live_mic_gain <= 0.0001f) return -80.0f;
+  return 20.0f * log10f(live_mic_gain);
 }
 
 /**
@@ -1253,138 +1438,6 @@ void WebUI_Poll(void)
     /* Advance by 1 byte to keep searching for valid header */
     uart_rx_tail = (uart_rx_tail + 1) % UART_RX_BUF_SIZE;
   }
-}
-
-
-/**
-  * @brief  Selects active microphone source by controlling hardware switch (PD10)
-  *         and configuring the software demuxer.
-  * @param  mic: Target microphone selection (MIC_SEL_MIC1..MIC4 or STEREO)
-  */
-void Audio_Select_Microphone(MicSelection_t mic)
-{
-  current_mic_sel = mic;
-
-  if (mic == MIC_SEL_MIC1 || mic == MIC_SEL_MIC2 || mic == MIC_SEL_IC1_STEREO)
-  {
-    /* Select IC1 (U8: MIC1=Left, MIC2=Right) -> PCM1808_DATA_EN HIGH */
-    HAL_GPIO_WritePin(PCM1808_DATA_EN_GPIO_Port, PCM1808_DATA_EN_Pin, GPIO_PIN_SET);
-  }
-  else
-  {
-    /* Select IC2 (U12: MIC3=Left, MIC4=Right) -> PCM1808_DATA_EN LOW */
-    HAL_GPIO_WritePin(PCM1808_DATA_EN_GPIO_Port, PCM1808_DATA_EN_Pin, GPIO_PIN_RESET);
-  }
-
-  /* Mute for 2 DMA buffer cycles to suppress hardware switching transients */
-  switch_mute_frames = 2;
-}
-
-/**
-  * @brief  Sets linear digital gain.
-  * @param  gain: Linear multiplier (e.g. 1.0 = 0dB, 2.0 = +6dB, 4.0 = +12dB)
-  */
-void Audio_Set_Gain_Linear(float gain)
-{
-  if (gain < 0.0f) gain = 0.0f;
-  live_mic_gain = gain;
-}
-
-/**
-  * @brief  Sets digital amplification in decibels (dB).
-  * @param  gain_db: Gain in dB (e.g. 0.0dB to +40.0dB)
-  */
-void Audio_Set_Gain_dB(float gain_db)
-{
-  live_mic_gain = powf(10.0f, gain_db / 20.0f);
-}
-
-/**
-  * @brief  Gets current digital amplification in decibels (dB).
-  * @retval Current gain in dB
-  */
-float Audio_Get_Gain_dB(void)
-{
-  if (live_mic_gain <= 0.00001f) return -100.0f;
-  return 20.0f * log10f(live_mic_gain);
-}
-
-/**
-  * @brief  Demultiplexes selected Mic, applies gain, and routes to DAC buffer.
-  * @param  pSrc: Interleaved raw ADC buffer from PCM1808 (32-bit slots)
-  * @param  pDst: Interleaved DAC buffer for PCM5102 (32-bit slots)
-  * @param  length: Total number of 32-bit words (Left + Right slots)
-  * @param  gain: Linear gain factor
-  */
-void Process_Mic_To_DAC(int32_t *pSrc, int32_t *pDst, uint16_t length, float gain)
-{
-  /* If switching ICs, output silence to prevent switching clicks */
-  if (switch_mute_frames > 0)
-  {
-    memset(pDst, 0, length * sizeof(int32_t));
-    switch_mute_frames--;
-    return;
-  }
-
-  for (uint16_t i = 0; i < length; i += 2)
-  {
-    /* Extract 24-bit samples (PCM1808 transmits MSB-aligned in upper 24 bits) */
-    int32_t raw_left  = pSrc[i]     >> 8; /* Left channel sample (MIC1 or MIC3) */
-    int32_t raw_right = pSrc[i + 1] >> 8; /* Right channel sample (MIC2 or MIC4) */
-
-    float out_left_f  = 0.0f;
-    float out_right_f = 0.0f;
-
-    switch (current_mic_sel)
-    {
-      case MIC_SEL_MIC1: /* IC1 Left (MIC1) -> Mono on both DAC channels */
-      case MIC_SEL_MIC3: /* IC2 Left (MIC3) -> Mono on both DAC channels */
-        out_left_f  = (float)raw_left * gain;
-        out_right_f = out_left_f;
-        break;
-
-      case MIC_SEL_MIC2: /* IC1 Right (MIC2) -> Mono on both DAC channels */
-      case MIC_SEL_MIC4: /* IC2 Right (MIC4) -> Mono on both DAC channels */
-        out_left_f  = (float)raw_right * gain;
-        out_right_f = out_left_f;
-        break;
-
-      case MIC_SEL_IC1_STEREO: /* IC1 Stereo: MIC1 -> L, MIC2 -> R */
-      case MIC_SEL_IC2_STEREO: /* IC2 Stereo: MIC3 -> L, MIC4 -> R */
-        out_left_f  = (float)raw_left  * gain;
-        out_right_f = (float)raw_right * gain;
-        break;
-    }
-
-    /* Soft Saturation / Anti-clipping Limiter (24-bit range: -8388608 to +8388607) */
-    if (out_left_f > 8388607.0f)        out_left_f = 8388607.0f;
-    else if (out_left_f < -8388608.0f)  out_left_f = -8388608.0f;
-
-    if (out_right_f > 8388607.0f)       out_right_f = 8388607.0f;
-    else if (out_right_f < -8388608.0f) out_right_f = -8388608.0f;
-
-    /* Pack back into 32-bit slot for PCM5102 DAC */
-    pDst[i]     = ((int32_t)out_left_f)  << 8;
-    pDst[i + 1] = ((int32_t)out_right_f) << 8;
-  }
-}
-
-/**
-  * @brief  SAI Rx Half-Transfer Complete callback (Ping buffer ready).
-  * @param  hsai: SAI handle pointer
-  */
-void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *hsai)
-{
-  Process_Mic_To_DAC(&rx_audio_buf[0], &tx_audio_buf[0], HALF_BUFFER_SIZE, live_mic_gain);
-}
-
-/**
-  * @brief  SAI Rx Transfer Complete callback (Pong buffer ready).
-  * @param  hsai: SAI handle pointer
-  */
-void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
-{
-  Process_Mic_To_DAC(&rx_audio_buf[HALF_BUFFER_SIZE], &tx_audio_buf[HALF_BUFFER_SIZE], HALF_BUFFER_SIZE, live_mic_gain);
 }
 
 /* ==============================================================================

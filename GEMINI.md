@@ -10,10 +10,12 @@
 
 ## 2. Hardware Architecture & Key Pin Mappings
 
-### Audio Engine & Signal Chain
-- **Audio ADC**: PCM1808 connected via **SAI1 Block A**
+- **Audio ADC**: Dual PCM1808 connected via **SAI1 Block A** (Master RX with DMA2 Stream 1 Ch 0)
   - `SAI1_MCLK_A` (PE2), `SAI1_FS_A` (PE4), `SAI1_SCK_A` (PE5), `SAI1_SD_A` (PE6)
-  - Data control: `PCM1808_DATA_EN` (PD10), `PCM_MIC_Control` (PA9)
+  - Data control: `PCM1808_DATA_EN` (PD10: HIGH = IC1 [Mic 1 Talkback L / Mic 2 Talkover Ext R], LOW = IC2 [Mic 3 Int Mic L / Mic 4 AUX R])
+  - `PCM_MIC_Control` (PA9): Kept LOW (0) so PCM5102 DAC analog output feeds PGA2311
+- **Audio DAC**: PCM5102 driven via **I2S1** (Master TX with DMA2 Stream 3 Ch 3: PA4 WS, PA5 CK, PA7 SD)
+- **Digital Loopback**: Microphones read through PCM1808 SAI1 DMA, digitally scaled in MCU, and streamed to PCM5102 DAC via I2S1 DMA
 - **Programmable Gain Amplifier (PGA)**:
   - `PGA_SCLK` (PB10), `PGA_CS1` (PB12), `PGA_MUTE_1` (PB13), `ZCEN` (Zero Crossing Enable - PB14)
   - `PGA_SDI` (PC1), `PGA_SDO` (PC2)

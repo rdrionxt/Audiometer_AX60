@@ -231,17 +231,17 @@
 <td style="text-align: left;"><strong>PCM_MIC_Control</strong></td>
 <td style="text-align: left;"><code>PA9</code></td>
 <td style="text-align: left;">GPIO Output</td>
-<td style="text-align: left;">HIGH=Mic/Aux, LOW=DAC</td>
+<td style="text-align: left;">LOW=DAC, HIGH=Mux</td>
 <td style="text-align: left;">LOW</td>
-<td style="text-align: left;">Analog Multiplexer: Selects Mic/Aux (HIGH) or PCM DAC Tone (LOW)</td>
+<td style="text-align: left;">Fixed LOW in Digital Loopback mode (PCM5102 DAC feeds PGA2311)</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>PCM1808_DATA_EN</strong></td>
 <td style="text-align: left;"><code>PD10</code></td>
 <td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH=IC1, LOW=IC2</td>
 <td style="text-align: left;">HIGH</td>
-<td style="text-align: left;">LOW</td>
-<td style="text-align: left;">Audio ADC (PCM1808) Serial Data Output Enable</td>
+<td style="text-align: left;">Audio ADC Select: HIGH=IC1 (Mic 1 L / Mic 2 R), LOW=IC2 (Mic 3 L / Mic 4 R)</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>PGA_MUTE_1</strong></td>
@@ -380,6 +380,7 @@
 <thead>
 <tr>
 <th style="text-align: left;">Feature Mode</th>
+<th style="text-align: center;"><code>PCM1808_DATA_EN</code> (PD10)</th>
 <th style="text-align: center;"><code>PCM_MIC_Control</code> (PA9)</th>
 <th style="text-align: center;"><code>TALKOVER_EN</code> (PD4)</th>
 <th style="text-align: center;"><code>MIC_EN</code> (PD6)</th>
@@ -397,7 +398,8 @@
 <tbody>
 <tr>
 <td style="text-align: left;"><strong>1. Talkover (Ext Mic)</strong></td>
-<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;"><strong>SET (1: IC1)</strong></td>
+<td style="text-align: center;"><strong>0</strong></td>
 <td style="text-align: center;"><strong>SET (1)</strong></td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
@@ -412,7 +414,8 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong>2. Talkover (Int Mic)</strong></td>
-<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;"><strong>RESET (0: IC2)</strong></td>
+<td style="text-align: center;"><strong>0</strong></td>
 <td style="text-align: center;"><strong>RESET (0)</strong></td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
@@ -427,7 +430,8 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong>3. Talkback (Cabinet Spk)</strong></td>
-<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;"><strong>SET (1: IC1)</strong></td>
+<td style="text-align: center;"><strong>0</strong></td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;"><strong>SET (1)</strong></td>
 <td style="text-align: center;">0</td>
@@ -442,7 +446,8 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong>4. Talkback (Headphones)</strong></td>
-<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;"><strong>SET (1: IC1)</strong></td>
+<td style="text-align: center;"><strong>0</strong></td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;"><strong>SET (1)</strong></td>
 <td style="text-align: center;">0</td>
@@ -457,7 +462,8 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong>5. AUX Audio Input</strong></td>
-<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;"><strong>RESET (0: IC2)</strong></td>
+<td style="text-align: center;"><strong>0</strong></td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;"><strong>SET (1)</strong></td>
@@ -472,7 +478,8 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong>6. AC Pure Tone (Left)</strong></td>
-<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;"><strong>SET (1: IC1)</strong></td>
+<td style="text-align: center;"><strong>0</strong></td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
@@ -487,7 +494,8 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong>7. AC Pure Tone (Right)</strong></td>
-<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;"><strong>SET (1: IC1)</strong></td>
+<td style="text-align: center;"><strong>0</strong></td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
@@ -502,7 +510,8 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong>8. Bone Conduction (BC)</strong></td>
-<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;"><strong>SET (1: IC1)</strong></td>
+<td style="text-align: center;"><strong>0</strong></td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
@@ -517,7 +526,8 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong>9. Insert Earphone</strong></td>
-<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;"><strong>SET (1: IC1)</strong></td>
+<td style="text-align: center;"><strong>0</strong></td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
@@ -532,7 +542,8 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong>10. Free Field (Spk)</strong></td>
-<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;"><strong>SET (1: IC1)</strong></td>
+<td style="text-align: center;"><strong>0</strong></td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
@@ -547,7 +558,8 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong>11. Standby / Mute</strong></td>
-<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;"><strong>SET (1: IC1)</strong></td>
+<td style="text-align: center;"><strong>0</strong></td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>
 <td style="text-align: center;">0</td>

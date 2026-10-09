@@ -19,8 +19,8 @@ This document is the authoritative hardware and firmware reference for controlli
 | **TALKOVER_EN** | `PD4` | GPIO Output | HIGH=Ext, LOW=Int | LOW | Talkover Mode: Mic Selector (HIGH=External, LOW=Internal) |
 | **MIC_AUX_EN** | `PD5` | GPIO Output | HIGH | LOW | Auxiliary 3.5mm Stereo Audio Input Buffer Enable |
 | **MIC_EN** | `PD6` | GPIO Output | HIGH | LOW | Patient Talkback Microphone Pre-Amp Enable |
-| **PCM_MIC_Control** | `PA9` | GPIO Output | HIGH=Mic/Aux, LOW=DAC | LOW | Analog Multiplexer: Selects Mic/Aux (HIGH) or PCM DAC Tone (LOW) |
-| **PCM1808_DATA_EN**| `PD10` | GPIO Output | HIGH | LOW | Audio ADC (PCM1808) Serial Data Output Enable |
+| **PCM_MIC_Control** | `PA9` | GPIO Output | LOW=DAC, HIGH=Mux | LOW | Fixed LOW in Digital Loopback mode (PCM5102 DAC feeds PGA2311) |
+| **PCM1808_DATA_EN**| `PD10` | GPIO Output | HIGH=IC1, LOW=IC2 | HIGH | Audio ADC Select: HIGH=IC1 (Mic 1 L / Mic 2 R), LOW=IC2 (Mic 3 L / Mic 4 R) |
 | **PGA_MUTE_1** | `PB13` | GPIO Output | LOW=Mute, HIGH=Active| LOW (Muted) | PGA2311 Hardware Output Mute Control |
 | **ZCEN** | `PB14` | GPIO Output | HIGH=Zero Cross, LOW=Imm | LOW | PGA2311 Zero-Crossing Gain Step Synchronizer |
 | **PGA_CS1** | `PB12` | GPIO Output | Active LOW | HIGH | PGA2311 SPI Chip Select |
@@ -44,19 +44,19 @@ This document is the authoritative hardware and firmware reference for controlli
 
 ### Quick Reference Summary Table
 
-| Feature Mode | `PCM_MIC_Control` (PA9) | `TALKOVER_EN` (PD4) | `MIC_EN` (PD6) | `MIC_AUX_EN` (PD5) | `AC_Left` (PE13) | `AC_Right` (PE14) | `BC_EN` (PE7) | `INSERT_EP` (PE12) | `FF_EN` (PE9) | `MH_EN` (PE8) | `INTERNAL_SPK` (PA15) | `OPA_EN` (PB2) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1. Talkover (Ext Mic)** | **SET (1)** | **SET (1)** | 0 | 0 | **1** | **1** | 0 | 0 | 0 | 0 | 0 | **1** |
-| **2. Talkover (Int Mic)** | **SET (1)** | **RESET (0)**| 0 | 0 | **1** | **1** | 0 | 0 | 0 | 0 | 0 | **1** |
-| **3. Talkback (Cabinet Spk)**| **SET (1)** | 0 | **SET (1)** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **SET (1)** | **1** |
-| **4. Talkback (Headphones)** | **SET (1)** | 0 | **SET (1)** | 0 | 0 | 0 | 0 | 0 | 0 | **SET (1)** | 0 | **1** |
-| **5. AUX Audio Input** | **SET (1)** | 0 | 0 | **SET (1)** | **1** | **1** | 0 | 0 | 0 | 0 | 0 | **1** |
-| **6. AC Pure Tone (Left)** | **RESET (0)**| 0 | 0 | 0 | **1** | **1\*** | 0 | 0 | 0 | 0 | 0 | **1** |
-| **7. AC Pure Tone (Right)**| **RESET (0)**| 0 | 0 | 0 | **1\*** | **1** | 0 | 0 | 0 | 0 | 0 | **1** |
-| **8. Bone Conduction (BC)**| **RESET (0)**| 0 | 0 | 0 | 0 | 0 | **1** | **1\*\*** | 0 | 0 | 0 | **1** |
-| **9. Insert Earphone** | **RESET (0)**| 0 | 0 | 0 | 0 | 0 | 0 | **1** | 0 | 0 | 0 | **1** |
-| **10. Free Field (Spk)** | **RESET (0)**| 0 | 0 | 0 | 0 | 0 | 0 | 0 | **1** | 0 | 0 | **1** |
-| **11. Standby / Mute** | **RESET (0)**| 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **1** |
+| Feature Mode | `PCM1808_DATA_EN` (PD10) | `PCM_MIC_Control` (PA9) | `TALKOVER_EN` (PD4) | `MIC_EN` (PD6) | `MIC_AUX_EN` (PD5) | `AC_Left` (PE13) | `AC_Right` (PE14) | `BC_EN` (PE7) | `INSERT_EP` (PE12) | `FF_EN` (PE9) | `MH_EN` (PE8) | `INTERNAL_SPK` (PA15) | `OPA_EN` (PB2) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1. Talkover (Ext Mic)** | **SET (1: IC1)** | **0** | **SET (1)** | 0 | 0 | **1** | **1** | 0 | 0 | 0 | 0 | 0 | **1** |
+| **2. Talkover (Int Mic)** | **RESET (0: IC2)**| **0** | **RESET (0)**| 0 | 0 | **1** | **1** | 0 | 0 | 0 | 0 | 0 | **1** |
+| **3. Talkback (Cabinet Spk)**| **SET (1: IC1)**| **0** | 0 | **SET (1)** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **SET (1)** | **1** |
+| **4. Talkback (Headphones)** | **SET (1: IC1)**| **0** | 0 | **SET (1)** | 0 | 0 | 0 | 0 | 0 | 0 | **SET (1)** | 0 | **1** |
+| **5. AUX Audio Input** | **RESET (0: IC2)**| **0** | 0 | 0 | **SET (1)** | **1** | **1** | 0 | 0 | 0 | 0 | 0 | **1** |
+| **6. AC Pure Tone (Left)** | **SET (1: IC1)** | **0**| 0 | 0 | 0 | **1** | **1\*** | 0 | 0 | 0 | 0 | 0 | **1** |
+| **7. AC Pure Tone (Right)**| **SET (1: IC1)** | **0**| 0 | 0 | 0 | **1\*** | **1** | 0 | 0 | 0 | 0 | 0 | **1** |
+| **8. Bone Conduction (BC)**| **SET (1: IC1)** | **0**| 0 | 0 | 0 | 0 | 0 | **1** | **1\*\*** | 0 | 0 | 0 | **1** |
+| **9. Insert Earphone** | **SET (1: IC1)** | **0**| 0 | 0 | 0 | 0 | 0 | 0 | **1** | 0 | 0 | 0 | **1** |
+| **10. Free Field (Spk)** | **SET (1: IC1)** | **0**| 0 | 0 | 0 | 0 | 0 | 0 | 0 | **1** | 0 | 0 | **1** |
+| **11. Standby / Mute** | **SET (1: IC1)** | **0**| 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **1** |
 
 *\*Note: In AC testing, opposite ear relay is turned ON when contralateral masking noise is active.*  
 *\*\*Note: In BC testing, INSERT_EP_EN is turned ON to deliver contralateral narrowband masking noise.*

@@ -82,36 +82,80 @@ void HAL_MspInit(void)
 void HAL_SAI_MspInit(SAI_HandleTypeDef* hsai)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
 
-  /* Peripheral clock enable */
-  __HAL_RCC_SAI1_CLK_ENABLE();
-  __HAL_RCC_SAI2_CLK_ENABLE();
-  __HAL_RCC_GPIOE_CLK_ENABLE();
-  __HAL_RCC_GPIOD_CLK_ENABLE();
+  if (hsai->Instance == SAI1_Block_A)
+  {
+    /* Configure PLLI2S clock for SAI1 */
+    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_SAI1;
+    if ((RCC->PLLCFGR & RCC_PLLCFGR_PLLSRC) == RCC_PLLCFGR_PLLSRC_HSI)
+    {
+      PeriphClkInitStruct.PLLI2S.PLLI2SM = 16;
+    }
+    else
+    {
+      PeriphClkInitStruct.PLLI2S.PLLI2SM = 8;
+    }
+    PeriphClkInitStruct.PLLI2S.PLLI2SN = 192;
+    PeriphClkInitStruct.PLLI2S.PLLI2SP = RCC_PLLI2SP_DIV2;
+    PeriphClkInitStruct.PLLI2S.PLLI2SR = 2;
+    PeriphClkInitStruct.PLLI2S.PLLI2SQ = 2;
+    PeriphClkInitStruct.PLLI2SDivQ = 1;
+    PeriphClkInitStruct.Sai1ClockSelection = RCC_SAI1CLKSOURCE_PLLI2S;
+    HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct);
 
-  /** PCM5102 DAC Audio GPIO Configuration
-    PE2     ------> SAI1_MCLK_A (SCK master clock for PCM5102)
-    PE5     ------> SAI1_SCK_A  (BCK bit clock for PCM5102)
-    PE4     ------> SAI1_FS_A   (LRCK frame sync)
-    PE6     ------> SAI1_SD_A   (DIN serial data)
-  */
-  GPIO_InitStruct.Pin = GPIO_PIN_2 | GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF6_SAI1;
-  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+    /* Peripheral clock enable */
+    __HAL_RCC_SAI1_CLK_ENABLE();
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+    __HAL_RCC_GPIOD_CLK_ENABLE();
 
-  /** Port D SAI2 / DAC Pins:
-    PD11    ------> SAI2_SD_A / FS (DIN / FS for PCM5102)
-    PD12    ------> SAI2_FS_A / DIN (FS / DIN for PCM5102)
-  */
-  GPIO_InitStruct.Pin = GPIO_PIN_11 | GPIO_PIN_12;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF10_SAI2;
-  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+    /** PCM1808 Audio ADC GPIO Configuration
+      PE2     ------> SAI1_MCLK_A (SCKI master clock for PCM1808: 256*Fs = 12.288MHz)
+      PE4     ------> SAI1_FS_A   (LRCK frame sync: 48kHz)
+      PE5     ------> SAI1_SCK_A  (BCK bit clock: 64*Fs = 3.072MHz)
+      PE6     ------> SAI1_SD_A   (DOUT serial data in from PCM1808)
+    */
+    GPIO_InitStruct.Pin = GPIO_PIN_2 | GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF6_SAI1;
+    HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+    /** PCM1808_DATA_EN Pin Configuration:
+      PD10    ------> PCM1808_DATA_EN (HIGH = IC1, LOW = IC2)
+    */
+    GPIO_InitStruct.Pin = PCM1808_DATA_EN_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(PCM1808_DATA_EN_GPIO_Port, &GPIO_InitStruct);
+    HAL_GPIO_WritePin(PCM1808_DATA_EN_GPIO_Port, PCM1808_DATA_EN_Pin, GPIO_PIN_SET); /* Default: IC1 */
+
+    /* Configure DMA2 Stream 1 Channel 0 for SAI1_Block_A RX */
+    extern DMA_HandleTypeDef hdma_sai1_a;
+    __HAL_RCC_DMA2_CLK_ENABLE();
+    hdma_sai1_a.Instance = DMA2_Stream1;
+    hdma_sai1_a.Init.Channel = DMA_CHANNEL_0;
+    hdma_sai1_a.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    hdma_sai1_a.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_sai1_a.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_sai1_a.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    hdma_sai1_a.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+    hdma_sai1_a.Init.Mode = DMA_CIRCULAR;
+    hdma_sai1_a.Init.Priority = DMA_PRIORITY_HIGH;
+    hdma_sai1_a.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+    if (HAL_DMA_Init(&hdma_sai1_a) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_LINKDMA(hsai, hdmarx, hdma_sai1_a);
+
+    /* DMA2 Stream 1 Interrupt Init */
+    HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 3, 0);
+    HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
+  }
 }
 
 /**
@@ -121,6 +165,10 @@ void HAL_SAI_MspDeInit(SAI_HandleTypeDef* hsai)
 {
   if (hsai->Instance == SAI1_Block_A)
   {
+    /* Disable DMA IRQ and de-init DMA */
+    HAL_NVIC_DisableIRQ(DMA2_Stream1_IRQn);
+    HAL_DMA_DeInit(hsai->hdmarx);
+
     /* Peripheral clock disable */
     __HAL_RCC_SAI1_CLK_DISABLE();
 
@@ -152,8 +200,8 @@ void HAL_I2S_MspInit(I2S_HandleTypeDef* hi2s)
 
   if (hi2s->Instance == SPI1)
   {
-    /* Configure PLLI2S for I2S1 on APB2 */
-    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_I2S_APB2;
+    /* Configure PLLI2S for I2S1 on APB2 and SAI1 */
+    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_I2S_APB2 | RCC_PERIPHCLK_SAI1;
     if ((RCC->PLLCFGR & RCC_PLLCFGR_PLLSRC) == RCC_PLLCFGR_PLLSRC_HSI)
     {
       PeriphClkInitStruct.PLLI2S.PLLI2SM = 16;
@@ -168,6 +216,7 @@ void HAL_I2S_MspInit(I2S_HandleTypeDef* hi2s)
     PeriphClkInitStruct.PLLI2S.PLLI2SQ = 2;
     PeriphClkInitStruct.PLLI2SDivQ = 1;
     PeriphClkInitStruct.I2sApb2ClockSelection = RCC_I2SAPB2CLKSOURCE_PLLI2S;
+    PeriphClkInitStruct.Sai1ClockSelection = RCC_SAI1CLKSOURCE_PLLI2S;
     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
     {
       Error_Handler();

@@ -255,6 +255,25 @@ void DMA2_Stream3_IRQHandler(void)
   HAL_DMA_IRQHandler(&hdma_spi1_tx);
 }
 
+extern SAI_HandleTypeDef hsai_BlockA1;
+extern DMA_HandleTypeDef hdma_sai1_a;
+
+/**
+  * @brief This function handles SAI1 global interrupt.
+  */
+void SAI1_IRQHandler(void)
+{
+  HAL_SAI_IRQHandler(&hsai_BlockA1);
+}
+
+/**
+  * @brief This function handles DMA2 Stream 1 global interrupt for continuous SAI1 RX streaming.
+  */
+void DMA2_Stream1_IRQHandler(void)
+{
+  HAL_DMA_IRQHandler(&hdma_sai1_a);
+}
+
 extern PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /**
