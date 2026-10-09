@@ -28,7 +28,7 @@
 #include "usbd_composite.h"
 
 /* USER CODE BEGIN Includes */
-
+#include "main.h"
 /* USER CODE END Includes */
 
 /* USER CODE BEGIN PV */
@@ -71,21 +71,19 @@ void MX_USB_DEVICE_Init(void)
   /* Init Device Library, add supported class and start the library. */
   if (USBD_Init(&hUsbDeviceFS, &FS_Desc, DEVICE_FS) != USBD_OK)
   {
-    Error_Handler();
+    Error_Handler_Ex(__FILE__, __LINE__, 301);
   }
   if (USBD_RegisterClass(&hUsbDeviceFS, &USBD_COMPOSITE) != USBD_OK)
   {
-    Error_Handler();
+    Error_Handler_Ex(__FILE__, __LINE__, 302);
   }
-#if !CDC_ONLY_NO_MSC
   if (USBD_MSC_RegisterStorage(&hUsbDeviceFS, &USBD_Storage_Interface_fops_FS) != USBD_OK)
   {
-    Error_Handler();
+    Error_Handler_Ex(__FILE__, __LINE__, 303);
   }
-#endif
   if (USBD_Start(&hUsbDeviceFS) != USBD_OK)
   {
-    Error_Handler();
+    Error_Handler_Ex(__FILE__, __LINE__, 304);
   }
 
   /* USER CODE BEGIN USB_DEVICE_Init_PostTreatment */

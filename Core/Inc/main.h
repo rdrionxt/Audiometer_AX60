@@ -99,6 +99,14 @@ typedef struct {
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
+void Error_Handler_Ex(const char *file, uint32_t line, uint32_t code);
+
+/* Diagnostic & Clock State Variables */
+extern volatile uint32_t dbg_main_step;
+extern volatile uint8_t dbg_clock_source; /* 1=HSE Crystal, 2=HSE Bypass, 3=HSI PLL, 4=Raw HSI */
+extern volatile const char *dbg_err_file;
+extern volatile uint32_t dbg_err_line;
+extern volatile uint32_t dbg_err_code;
 void PeriphCommonClock_Config(void);
 void MX_SAI1_Init(void);
 void MX_I2S1_Init(void);
@@ -106,6 +114,7 @@ void MX_USART2_UART_Init(void);
 void MX_USART3_UART_Init(void);
 
 extern I2S_HandleTypeDef hi2s1;
+extern DMA_HandleTypeDef hdma_spi1_tx;
 extern UART_HandleTypeDef huart2;
 extern UART_HandleTypeDef huart3;
 
@@ -169,8 +178,6 @@ void Audio_I2S_ISR_Handler(void);
 #define WN_EN_GPIO_Port           MH_EN_GPIO_Port
 #define FF_EN_Pin                 GPIO_PIN_9
 #define FF_EN_GPIO_Port           GPIOE
-#define BC_L_R_EN_Pin             GPIO_PIN_10
-#define BC_L_R_EN_GPIO_Port       GPIOE
 #define INSERT_EP_EN_Pin          GPIO_PIN_12
 #define INSERT_EP_EN_GPIO_Port    GPIOE
 #define AC_Left_EN_Pin            GPIO_PIN_13
@@ -190,11 +197,6 @@ void Audio_I2S_ISR_Handler(void);
 #define OPA_EN_GPIO_Port          GPIOB
 #define PCM_MIC_Control_Pin       GPIO_PIN_9
 #define PCM_MIC_Control_GPIO_Port GPIOA
-
-#define STIMULUS1_Pin             GPIO_PIN_6
-#define STIMULUS1_GPIO_Port       GPIOA
-#define STIMULUS2_Pin             GPIO_PIN_15
-#define STIMULUS2_GPIO_Port       GPIOB
 
 /* Codec Controls */
 #define PCM1808_DATA_EN_Pin       GPIO_PIN_10

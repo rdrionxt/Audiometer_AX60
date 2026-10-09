@@ -10,11 +10,6 @@ extern "C" {
 #include "usbd_msc.h"
 #include "usbd_cdc.h"
 
-/* 1 = CDC COM only (no Windows USB Drive / MSC). FatFs still reads SD in firmware. */
-#ifndef CDC_ONLY_NO_MSC
-#define CDC_ONLY_NO_MSC  1
-#endif
-
 /* ── Composite descriptor total size ─────────────────────────── */
 /*
  *  9  Config descriptor
@@ -28,13 +23,13 @@ extern "C" {
  *  9  CDC Data Interface
  *  7  CDC Bulk OUT EP
  *  7  CDC Bulk IN EP
- *  [optional MSC: 9+7+7]
+ *  9  MSC Interface
+ *  7  MSC Bulk IN EP
+ *  7  MSC Bulk OUT EP
+ * ─────────────────
+ * 98 bytes total
  */
-#if CDC_ONLY_NO_MSC
-#define USB_COMPOSITE_CONFIG_DESC_SIZ   75U
-#else
 #define USB_COMPOSITE_CONFIG_DESC_SIZ   98U
-#endif
 
 /* ── Composite class handle ───────────────────────────────────── */
 typedef struct {

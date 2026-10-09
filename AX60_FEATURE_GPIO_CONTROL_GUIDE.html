@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AX60 Clinical Audiometer — Hardware & GPIO Specification</title>
+<style>
+  @page {
+    size: A4;
+    margin: 16mm 14mm 16mm 14mm;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.45;
+    color: #0f172a;
+    margin: 0;
+    padding: 0;
+  }
+  h1 {
+    font-size: 16pt;
+    font-weight: 700;
+    color: #0f172a;
+    border-bottom: 2.5px solid #0284c7;
+    padding-bottom: 6px;
+    margin-top: 0;
+    margin-bottom: 8px;
+    letter-spacing: -0.02em;
+  }
+  h2 {
+    font-size: 12pt;
+    font-weight: 600;
+    color: #0369a1;
+    border-bottom: 1.5px solid #e2e8f0;
+    padding-bottom: 4px;
+    margin-top: 18px;
+    margin-bottom: 8px;
+    break-after: avoid;
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    font-size: 10.5pt;
+    font-weight: 600;
+    color: #1e293b;
+    margin-top: 14px;
+    margin-bottom: 4px;
+    break-after: avoid;
+  }
+  p, ul, ol {
+    margin-top: 3px;
+    margin-bottom: 6px;
+  }
+  li {
+    margin-bottom: 2px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 6px;
+    margin-bottom: 12px;
+    font-size: 8pt;
+    break-inside: avoid;
+  }
+  tr {
+    break-inside: avoid;
+  }
+  th, td {
+    border: 1px solid #cbd5e1;
+    padding: 5px 7px;
+    text-align: left;
+    vertical-align: middle;
+  }
+  th {
+    background-color: #f1f5f9;
+    color: #0f172a;
+    font-weight: 600;
+  }
+  tbody tr:nth-child(even) {
+    background-color: #f8fafc;
+  }
+  code {
+    font-family: Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 8pt;
+    background-color: #f1f5f9;
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #0369a1;
+    border: 1px solid #e2e8f0;
+  }
+  pre {
+    background-color: #0f172a;
+    color: #f8fafc;
+    padding: 8px 12px;
+    border-radius: 5px;
+    overflow-x: auto;
+    font-size: 8pt;
+    line-height: 1.35;
+    break-inside: avoid;
+    margin: 6px 0;
+  }
+  pre code {
+    background-color: transparent;
+    color: #38bdf8;
+    padding: 0;
+    border: none;
+  }
+  blockquote {
+    margin: 6px 0;
+    padding: 5px 10px;
+    border-left: 3px solid #0284c7;
+    background-color: #f0f9ff;
+    color: #0369a1;
+    font-size: 8.5pt;
+    border-radius: 0 4px 4px 0;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid #e2e8f0;
+    margin: 12px 0;
+  }
+  strong {
+    color: #0f172a;
+  }
+</style>
+</head>
+<body>
+<h1>AX60 Clinical Audiometer — Hardware &amp; Feature GPIO Control Specification</h1>
+<p>This document is the authoritative hardware and firmware reference for controlling every feature and audio routing mode on the <strong>AX60 Audiometer (STM32F446VET6)</strong>.</p>
+<hr />
+<h2>1. Master GPIO Pin Mapping Table</h2>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Pin Name</th>
+<th style="text-align: left;">Port / Pin</th>
+<th style="text-align: left;">Alternate / Mode</th>
+<th style="text-align: left;">Active Level</th>
+<th style="text-align: left;">Default State</th>
+<th style="text-align: left;">Description / Hardware Destination</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>AC_Left_EN</strong></td>
+<td style="text-align: left;"><code>PE13</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">Air Conduction (AC) Left Earphone Relay (TDH-39 / DD45)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>AC_Right_EN</strong></td>
+<td style="text-align: left;"><code>PE14</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">Air Conduction (AC) Right Earphone Relay</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BC_EN</strong></td>
+<td style="text-align: left;"><code>PE7</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">Bone Conduction (BC) Transducer Relay (Radioear B71 / B81)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>INSERT_EP_EN</strong></td>
+<td style="text-align: left;"><code>PE12</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">Insert Earphone Relay (ER-3A / ER-5A)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>FF_EN</strong></td>
+<td style="text-align: left;"><code>PE9</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">Free Field (FF) Loudspeaker Output Relay</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>WN_EN / MH_EN</strong></td>
+<td style="text-align: left;"><code>PE8</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">White Noise / Monitor Headphone Enable Relay</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>INTERNAL_SPK_EN</strong></td>
+<td style="text-align: left;"><code>PA15</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">Internal Cabinet Speaker Relay (Examiner Talkback)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>OPA_EN</strong></td>
+<td style="text-align: left;"><code>PB2</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">High-Current Analog Output Op-Amp Enable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>TALKOVER_EN</strong></td>
+<td style="text-align: left;"><code>PD4</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH=Ext, LOW=Int</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">Talkover Mode: Mic Selector (HIGH=External, LOW=Internal)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>MIC_AUX_EN</strong></td>
+<td style="text-align: left;"><code>PD5</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">Auxiliary 3.5mm Stereo Audio Input Buffer Enable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>MIC_EN</strong></td>
+<td style="text-align: left;"><code>PD6</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">Patient Talkback Microphone Pre-Amp Enable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PCM_MIC_Control</strong></td>
+<td style="text-align: left;"><code>PA9</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH=Mic/Aux, LOW=DAC</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">Analog Multiplexer: Selects Mic/Aux (HIGH) or PCM DAC Tone (LOW)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PCM1808_DATA_EN</strong></td>
+<td style="text-align: left;"><code>PD10</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">Audio ADC (PCM1808) Serial Data Output Enable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PGA_MUTE_1</strong></td>
+<td style="text-align: left;"><code>PB13</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">LOW=Mute, HIGH=Active</td>
+<td style="text-align: left;">LOW (Muted)</td>
+<td style="text-align: left;">PGA2311 Hardware Output Mute Control</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>ZCEN</strong></td>
+<td style="text-align: left;"><code>PB14</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">HIGH=Zero Cross, LOW=Imm</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">PGA2311 Zero-Crossing Gain Step Synchronizer</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PGA_CS1</strong></td>
+<td style="text-align: left;"><code>PB12</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">Active LOW</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">PGA2311 SPI Chip Select</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PGA_SCLK</strong></td>
+<td style="text-align: left;"><code>PB10</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">Rising Edge Clock</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">PGA2311 SPI Serial Clock</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PGA_SDI</strong></td>
+<td style="text-align: left;"><code>PC1</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">Data In (MOSI)</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">PGA2311 Serial Data Input</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PGA_SDO</strong></td>
+<td style="text-align: left;"><code>PC2</code></td>
+<td style="text-align: left;">GPIO Input</td>
+<td style="text-align: left;">Data Out (MISO)</td>
+<td style="text-align: left;">High-Z</td>
+<td style="text-align: left;">PGA2311 Serial Data Output</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PAT_RESPONSE_SW</strong></td>
+<td style="text-align: left;"><code>PB3</code></td>
+<td style="text-align: left;">EXTI3 Input</td>
+<td style="text-align: left;">Active LOW</td>
+<td style="text-align: left;">HIGH (Pull-up)</td>
+<td style="text-align: left;">Patient Push-Button Response Handswitch</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BAT_READ</strong></td>
+<td style="text-align: left;"><code>PA0</code></td>
+<td style="text-align: left;">ADC1_IN0</td>
+<td style="text-align: left;">Analog</td>
+<td style="text-align: left;">Analog In</td>
+<td style="text-align: left;">Battery Voltage Divider Sensing</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>POWER_DETECTION</strong></td>
+<td style="text-align: left;"><code>PA1</code></td>
+<td style="text-align: left;">GPIO Input</td>
+<td style="text-align: left;">HIGH=Connected</td>
+<td style="text-align: left;">In</td>
+<td style="text-align: left;">DC Mains / Wall Adapter Power Detector</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>RTC_EN (CE)</strong></td>
+<td style="text-align: left;"><code>PB1</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">Active HIGH</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">DS1302 Real-Time Clock Chip Enable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>RTC_CLK (SCLK)</strong></td>
+<td style="text-align: left;"><code>PB6</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">Rising Edge</td>
+<td style="text-align: left;">LOW</td>
+<td style="text-align: left;">DS1302 Serial Clock</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>RTC_IO (DAT)</strong></td>
+<td style="text-align: left;"><code>PB9</code></td>
+<td style="text-align: left;">GPIO Bidirectional</td>
+<td style="text-align: left;">Data Line</td>
+<td style="text-align: left;">In/Out</td>
+<td style="text-align: left;">DS1302 Bidirectional Data Pin</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>FRAM_CS</strong></td>
+<td style="text-align: left;"><code>PC13</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">Active LOW</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">SPI3 Non-Volatile FRAM Chip Select (Calibration Tables)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>SD_CS</strong></td>
+<td style="text-align: left;"><code>PC12</code></td>
+<td style="text-align: left;">GPIO Output</td>
+<td style="text-align: left;">Active LOW</td>
+<td style="text-align: left;">HIGH</td>
+<td style="text-align: left;">SPI3 MicroSD Card Chip Select (Patient Records)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>USART2 TX / RX</strong></td>
+<td style="text-align: left;"><code>PA2 / PA3</code></td>
+<td style="text-align: left;">AF7 (<code>USART2</code>)</td>
+<td style="text-align: left;">Serial TTL</td>
+<td style="text-align: left;">--</td>
+<td style="text-align: left;">Proculus 7-inch Intelligent Display (115200 8N1)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>USART3 TX / RX</strong></td>
+<td style="text-align: left;"><code>PD8 / PC5</code></td>
+<td style="text-align: left;">AF7 (<code>USART3</code>)</td>
+<td style="text-align: left;">Serial TTL</td>
+<td style="text-align: left;">--</td>
+<td style="text-align: left;">CH340G USB Serial (WebUI / Future Thermal Printer)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>2. Feature-by-Feature GPIO Control Matrix</h2>
+<h3>Quick Reference Summary Table</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Feature Mode</th>
+<th style="text-align: center;"><code>PCM_MIC_Control</code> (PA9)</th>
+<th style="text-align: center;"><code>TALKOVER_EN</code> (PD4)</th>
+<th style="text-align: center;"><code>MIC_EN</code> (PD6)</th>
+<th style="text-align: center;"><code>MIC_AUX_EN</code> (PD5)</th>
+<th style="text-align: center;"><code>AC_Left</code> (PE13)</th>
+<th style="text-align: center;"><code>AC_Right</code> (PE14)</th>
+<th style="text-align: center;"><code>BC_EN</code> (PE7)</th>
+<th style="text-align: center;"><code>INSERT_EP</code> (PE12)</th>
+<th style="text-align: center;"><code>FF_EN</code> (PE9)</th>
+<th style="text-align: center;"><code>MH_EN</code> (PE8)</th>
+<th style="text-align: center;"><code>INTERNAL_SPK</code> (PA15)</th>
+<th style="text-align: center;"><code>OPA_EN</code> (PB2)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>1. Talkover (Ext Mic)</strong></td>
+<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+<td style="text-align: center;"><strong>1</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>2. Talkover (Int Mic)</strong></td>
+<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+<td style="text-align: center;"><strong>1</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>3. Talkback (Cabinet Spk)</strong></td>
+<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;"><strong>1</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>4. Talkback (Headphones)</strong></td>
+<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>5. AUX Audio Input</strong></td>
+<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>SET (1)</strong></td>
+<td style="text-align: center;"><strong>1</strong></td>
+<td style="text-align: center;"><strong>1</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>6. AC Pure Tone (Left)</strong></td>
+<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+<td style="text-align: center;"><strong>1*</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>7. AC Pure Tone (Right)</strong></td>
+<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1*</strong></td>
+<td style="text-align: center;"><strong>1</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>8. Bone Conduction (BC)</strong></td>
+<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+<td style="text-align: center;"><strong>1**</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>9. Insert Earphone</strong></td>
+<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>10. Free Field (Spk)</strong></td>
+<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>11. Standby / Mute</strong></td>
+<td style="text-align: center;"><strong>RESET (0)</strong></td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;">0</td>
+<td style="text-align: center;"><strong>1</strong></td>
+</tr>
+</tbody>
+</table>
+<p><em>*Note: In AC testing, opposite ear relay is turned ON when contralateral masking noise is active.</em><br />
+<em>**Note: In BC testing, INSERT_EP_EN is turned ON to deliver contralateral narrowband masking noise.</em></p>
+<hr />
+<h2>3. Detailed Operation &amp; Code Implementation for Each Feature</h2>
+<h3>Feature 1: Talkover (Examiner → Patient)</h3>
+<ul>
+<li><strong>Goal</strong>: Examiner speaks into the console mic to communicate instructions directly into the patient's headphones.</li>
+<li><strong>GPIO States</strong>:</li>
+<li><code>PCM_MIC_Control</code> (<code>PA9</code>) → <strong>HIGH (1)</strong> (Bypasses DAC tone generator; routes analog mic pre-amp)</li>
+<li><code>TALKOVER_EN</code> (<code>PD4</code>):<ul>
+<li><strong>HIGH (1)</strong> = External Gooseneck / Headset Microphone</li>
+<li><strong>LOW (0)</strong> = Internal Front-Panel Console Microphone</li>
+</ul>
+</li>
+<li><code>MIC_EN</code> (<code>PD6</code>) → <strong>LOW (0)</strong> (Patient mic disabled)</li>
+<li><code>MIC_AUX_EN</code> (<code>PD5</code>) → <strong>LOW (0)</strong> (Auxiliary line disabled)</li>
+<li><code>AC_Left_EN</code> (<code>PE13</code>) &amp; <code>AC_Right_EN</code> (<code>PE14</code>) → <strong>HIGH (1)</strong> (Both patient headphone sides enabled)</li>
+<li><code>BC_EN</code> (<code>PE7</code>), <code>INSERT_EP_EN</code> (<code>PE12</code>), <code>FF_EN</code> (<code>PE9</code>) → <strong>LOW (0)</strong></li>
+<li><code>MH_EN</code> (<code>PE8</code>), <code>INTERNAL_SPK_EN</code> (<code>PA15</code>) → <strong>LOW (0)</strong> (Examiner speakers muted)</li>
+<li><code>OPA_EN</code> (<code>PB2</code>) → <strong>HIGH (1)</strong> (Output op-amp active)</li>
+<li><strong>PGA Volume</strong>: Set to unity gain (<code>192</code> = 0 dB) via <code>PGA2311_SetVolume(192, 192)</code>.</li>
+</ul>
+<pre><code class="language-c">void Feature_Enable_Talkover(uint8_t use_external_mic)
+{
+    /* 1. Mute PGA to prevent audio pop */
+    PGA2311_Mute();
+
+    /* 2. Select Mic over DAC */
+    HAL_GPIO_WritePin(GPIOA, PCM_MIC_Control_Pin, GPIO_PIN_SET);
+
+    /* 3. Choose External vs Internal Examiner Mic */
+    HAL_GPIO_WritePin(GPIOD, TALKOVER_EN_Pin, use_external_mic ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOD, MIC_EN_Pin | MIC_AUX_EN_Pin, GPIO_PIN_RESET);
+
+    /* 4. Route audio strictly to patient headphones */
+    HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOE, BC_EN_Pin | INSERT_EP_EN_Pin | FF_EN_Pin | MH_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOA, INTERNAL_SPK_EN_Pin, GPIO_PIN_RESET);
+
+    /* 5. Set unity gain and unmute */
+    PGA2311_SetVolume(192, 192);
+    PGA2311_Unmute();
+}
+</code></pre>
+<hr />
+<h3>Feature 2: Talkback (Patient → Examiner)</h3>
+<ul>
+<li><strong>Goal</strong>: Allows patient inside a soundproof booth to speak to the examiner. Prevents acoustic feedback howling by isolating patient transducers.</li>
+<li><strong>GPIO States</strong>:</li>
+<li><code>PCM_MIC_Control</code> (<code>PA9</code>) → <strong>HIGH (1)</strong></li>
+<li><code>MIC_EN</code> (<code>PD6</code>) → <strong>HIGH (1)</strong> (Activates patient booth mic amplifier)</li>
+<li><code>TALKOVER_EN</code> (<code>PD4</code>) → <strong>LOW (0)</strong></li>
+<li><code>MIC_AUX_EN</code> (<code>PD5</code>) → <strong>LOW (0)</strong></li>
+<li><strong>Patient Isolation</strong>: <code>AC_Left_EN</code>=0, <code>AC_Right_EN</code>=0, <code>BC_EN</code>=0, <code>INSERT_EP_EN</code>=0, <code>FF_EN</code>=0</li>
+<li><strong>Examiner Destination</strong>:<ul>
+<li><strong>Cabinet Speaker</strong>: <code>INTERNAL_SPK_EN</code> (<code>PA15</code>) → <strong>HIGH (1)</strong>, <code>MH_EN</code> (<code>PE8</code>) → <strong>LOW (0)</strong></li>
+<li><strong>Monitor Headphones</strong>: <code>MH_EN</code> (<code>PE8</code>) → <strong>HIGH (1)</strong>, <code>INTERNAL_SPK_EN</code> (<code>PA15</code>) → <strong>LOW (0)</strong></li>
+</ul>
+</li>
+</ul>
+<pre><code class="language-c">void Feature_Enable_Talkback(uint8_t destination_is_internal_speaker)
+{
+    PGA2311_Mute();
+
+    /* Select Patient Mic */
+    HAL_GPIO_WritePin(GPIOA, PCM_MIC_Control_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOD, MIC_EN_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOD, TALKOVER_EN_Pin | MIC_AUX_EN_Pin, GPIO_PIN_RESET);
+
+    /* Mute all patient transducers to prevent feedback loop */
+    HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin | BC_EN_Pin | INSERT_EP_EN_Pin | FF_EN_Pin, GPIO_PIN_RESET);
+
+    /* Route to Examiner Monitor */
+    if (destination_is_internal_speaker) {
+        HAL_GPIO_WritePin(GPIOA, INTERNAL_SPK_EN_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(GPIOE, MH_EN_Pin, GPIO_PIN_RESET);
+    } else {
+        HAL_GPIO_WritePin(GPIOE, MH_EN_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(GPIOA, INTERNAL_SPK_EN_Pin, GPIO_PIN_RESET);
+    }
+
+    PGA2311_SetVolume(192, 192);
+    PGA2311_Unmute();
+}
+</code></pre>
+<hr />
+<h3>Feature 3: Auxiliary Audio Input (Speech Audiometry / CD / AUX)</h3>
+<ul>
+<li><strong>Goal</strong>: Feeds pre-recorded speech material from a 3.5mm input jack into the patient's headphones.</li>
+<li><strong>GPIO States</strong>:</li>
+<li><code>PCM_MIC_Control</code> (<code>PA9</code>) → <strong>HIGH (1)</strong></li>
+<li><code>MIC_AUX_EN</code> (<code>PD5</code>) → <strong>HIGH (1)</strong></li>
+<li><code>TALKOVER_EN</code> (<code>PD4</code>) → <strong>LOW (0)</strong>, <code>MIC_EN</code> (<code>PD6</code>) → <strong>LOW (0)</strong></li>
+<li><code>AC_Left_EN</code> (<code>PE13</code>) &amp; <code>AC_Right_EN</code> (<code>PE14</code>) → <strong>HIGH (1)</strong></li>
+<li><code>BC_EN</code>=0, <code>INSERT_EP_EN</code>=0, <code>FF_EN</code>=0, <code>MH_EN</code>=0, <code>INTERNAL_SPK_EN</code>=0</li>
+<li><code>OPA_EN</code> (<code>PB2</code>) → <strong>HIGH (1)</strong></li>
+</ul>
+<hr />
+<h3>Feature 4: Air Conduction Pure Tone &amp; Warble (AC Left / Right)</h3>
+<ul>
+<li><strong>Goal</strong>: Delivers pure tones (125 Hz to 8000 Hz) or Warble tones at -10 dB to 120 dB HL.</li>
+<li><strong>GPIO States</strong>:</li>
+<li><code>PCM_MIC_Control</code> (<code>PA9</code>) → <strong>LOW (0)</strong> (Selects I2S1 PCM5102 DAC output)</li>
+<li><code>TALKOVER_EN</code>=0, <code>MIC_EN</code>=0, <code>MIC_AUX_EN</code>=0</li>
+<li><code>AC_Left_EN</code> (<code>PE13</code>) → <strong>HIGH (1)</strong></li>
+<li><code>AC_Right_EN</code> (<code>PE14</code>) → <strong>HIGH (1)</strong></li>
+<li><code>BC_EN</code>=0, <code>INSERT_EP_EN</code>=0, <code>FF_EN</code>=0</li>
+<li><strong>PGA Attenuator</strong>: Gain calculated via <code>DbToPGA2311(db_level)</code>.</li>
+</ul>
+<hr />
+<h3>Feature 5: Bone Conduction (BC with Contralateral Masking)</h3>
+<ul>
+<li><strong>Goal</strong>: Routes stimulus vibrations to Radioear B71/B81 transducer; routes Narrowband Noise masking to contralateral insert earphone.</li>
+<li><strong>GPIO States</strong>:</li>
+<li><code>PCM_MIC_Control</code> (<code>PA9</code>) → <strong>LOW (0)</strong></li>
+<li><code>BC_EN</code> (<code>PE7</code>) → <strong>HIGH (1)</strong> (Enables Bone Conductor power driver)</li>
+<li><code>INSERT_EP_EN</code> (<code>PE12</code>) → <strong>HIGH (1)</strong> (Delivers masking noise into opposite ear canal)</li>
+<li><code>AC_Left_EN</code>=0, <code>AC_Right_EN</code>=0, <code>FF_EN</code>=0</li>
+</ul>
+<pre><code class="language-c">void Feature_Enable_BoneConduction(uint8_t enable_insert_masking)
+{
+    PGA2311_Mute();
+
+    HAL_GPIO_WritePin(GPIOA, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin | FF_EN_Pin, GPIO_PIN_RESET);
+
+    /* Turn ON Bone Conductor */
+    HAL_GPIO_WritePin(GPIOE, BC_EN_Pin, GPIO_PIN_SET);
+
+    /* Enable Insert Earphone for contralateral masking noise */
+    HAL_GPIO_WritePin(GPIOE, INSERT_EP_EN_Pin, enable_insert_masking ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+    PGA2311_Unmute();
+}
+</code></pre>
+<hr />
+<h3>Feature 6: Free Field Testing (FF)</h3>
+<ul>
+<li><strong>Goal</strong>: Directs audio to external sound room amplifier and calibrated speakers.</li>
+<li><strong>GPIO States</strong>:</li>
+<li><code>PCM_MIC_Control</code> (<code>PA9</code>) → <strong>LOW (0)</strong></li>
+<li><code>FF_EN</code> (<code>PE9</code>) → <strong>HIGH (1)</strong></li>
+<li><code>AC_Left_EN</code>=0, <code>AC_Right_EN</code>=0, <code>BC_EN</code>=0, <code>INSERT_EP_EN</code>=0</li>
+</ul>
+<hr />
+<h2>4. PGA2311 Attenuation &amp; Click-Free Switching Discipline</h2>
+<p>The PGA2311 offers 0.5 dB step resolution (0..255). Step 0 = Mute, Step 1 = -95.5 dB, Step 192 = 0 dB (Unity Gain), Step 255 = +31.5 dB.</p>
+<h3>Safe Pop/Click Elimination Sequence</h3>
+<p>Always execute this exact 5-step sequence when changing transducers, modes, or stepping gain:</p>
+<pre><code>[1. Assert PGA_MUTE_1 = LOW] 
+          │
+[2. Settle Delay (2 to 5 ms)]
+          │
+[3. Toggle Relay GPIOs (AC_EN, BC_EN, etc.)]
+          │
+[4. Shift 16-bit Volume to PGA2311 via SPI]
+          │
+[5. Deassert PGA_MUTE_1 = HIGH (Unmute)]
+</code></pre>
+<hr />
+<h2>5. Patient Response Switch &amp; Power Monitoring</h2>
+<h3>Patient Handswitch (<code>PB3</code> / <code>EXTI3</code>)</h3>
+<ul>
+<li><strong>Pin</strong>: <code>PB3</code> configured as input with <code>GPIO_PULLUP</code>.</li>
+<li><strong>Logic</strong>: Active LOW. Pressing the button pulls <code>PB3</code> to GND.</li>
+<li><strong>Handling</strong>: Configured with <code>EXTI3_IRQHandler</code>. Fast software debounce window (&gt; 50 ms). Transmits response packet <code>0xAA 0x50 0x01 0x55</code> immediately to WebUI and Proculus display.</li>
+</ul>
+<h3>Battery &amp; Mains Voltage Detection</h3>
+<ul>
+<li><strong><code>BAT_READ</code> (<code>PA0</code> / <code>ADC1_IN0</code>)</strong>: Measures battery pack voltage through a resistor divider. Polled periodically, averaged, and passed through a 1% slew rate limiter in <code>battery.c</code>.</li>
+<li><strong><code>POWER_DETECTION</code> (<code>PA1</code>)</strong>: Digital input. HIGH indicates external 12V/15V DC charger is plugged in.</li>
+</ul>
+<hr />
+<h2>6. Communication Architecture</h2>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Interface</th>
+<th style="text-align: left;">Baud Rate</th>
+<th style="text-align: left;">Frame Protocol</th>
+<th style="text-align: left;">Primary Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>USART2 (<code>PA2</code>/<code>PA3</code>)</strong></td>
+<td style="text-align: left;">115200 8N1</td>
+<td style="text-align: left;">Proculus DGUS / UnicView AD (<code>0x5A 0xA5 ...</code>)</td>
+<td style="text-align: left;"><strong>Proculus 7-inch Intelligent Display</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>USART3 (<code>PD8</code>/<code>PC5</code>)</strong></td>
+<td style="text-align: left;">115200 8N1</td>
+<td style="text-align: left;">Binary/ASCII Protocol (<code>0xAA ... 0x55</code>)</td>
+<td style="text-align: left;"><strong>CH340G USB Serial</strong> (WebUI control / future Thermal Printer)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>USB OTG FS</strong></td>
+<td style="text-align: left;">12 Mbps</td>
+<td style="text-align: left;">USB CDC Virtual COM Port</td>
+<td style="text-align: left;">Direct PC USB connection</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>

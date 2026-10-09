@@ -19,7 +19,7 @@
   - `PGA_SDI` (PC1), `PGA_SDO` (PC2)
 - **Output Channel Switching & Amplification**:
   - Air Conduction: `AC_Left_EN` (PE13), `AC_Right_EN` (PE14)
-  - Bone Conduction: `BC_EN` (PE7), `BC_L_R_EN` (PE10)
+  - Bone Conduction: `BC_EN` (PE7)
   - Insert Earphone: `INSERT_EP_EN` (PE12)
   - Free Field: `FF_EN` (PE9)
   - Masking Noise: `WN_EN` (White Noise Enable - PE8)
@@ -30,7 +30,6 @@
 
 ### User Inputs & Indicators
 - **Patient Response Switch**: `pat_response_switch` on **PB3** configured with `EXTI3`
-- **Stimulus Indicators**: `STIMULUS1` (PA6), `STIMULUS2` (PB15)
 
 ### Peripherals & Storage
 - **SPI3**: `SD_CS` (PC12), `FRAM_CS` (PC13), `SCK` (PC10), `MISO` (PC11), `MOSI` (PB5)
@@ -38,9 +37,12 @@
 - **RTC**: `RTC_EN` (PB1), `RTC_CLK` (PB6), `RTC_IO` (PB9)
 - **Power Monitoring**: `BAT_READ` (ADC1_IN0 PA0), `POWER_DETECTION` (PA1)
 
-### Host Communication
-- **USART2**: TX (PA2), RX (PA3)
-- **USART3**: TX (PD8), RX (PC5)
+### Communication & Display Interfaces
+- **USART2 (Display Interface)**: TX (PA2), RX (PA3)
+  - Dedicated serial interface for **Proculus 7-inch Intelligent Display** (UART LCM / UnicView AD protocol)
+- **USART3 (PC Communication / CH340G & Future Thermal Printer)**: TX (PD8), RX (PC5)
+  - Connected to on-board CH340G USB Serial bridge for PC & WebUI communication
+  - Planned for Thermal Printer interface in future revisions
 - **USB OTG FS**: ID (PA10), DM (PA11), DP (PA12)
 
 ---

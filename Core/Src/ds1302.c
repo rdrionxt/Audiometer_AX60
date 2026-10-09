@@ -7,6 +7,11 @@
 
 #include "ds1302.h"
 
+/* Diagnostic variables visible in STM32CubeIDE Live Expressions */
+volatile uint8_t ds1302_dbg_burst[8] = {0};
+volatile uint8_t ds1302_dbg_last_ok = 0;
+volatile uint8_t ds1302_dbg_sec_reg = 0;
+
 /* ── BCD Conversion Utilities ─────────────────────────────────────── */
 static uint8_t dec_to_bcd(uint8_t val)
 {
@@ -210,6 +215,7 @@ uint8_t DS1302_GetTime(DS1302_DateTime_t *dt)
     for (uint8_t i = 0; i < 8; i++)
     {
         burst[i] = DS1302_ReadByte_Raw();
+        ds1302_dbg_burst[i] = burst[i];
     }
     
     CE_Low();
@@ -247,9 +253,34 @@ uint8_t DS1302_GetTime(DS1302_DateTime_t *dt)
     if (dt->month == 0 || dt->month > 12 || dt->day == 0 || dt->day > 31 ||
         dt->hour > 23 || dt->min > 59 || dt->sec > 59)
     {
-        return 0; // Invalid / disconnected
+        // Try fallback individual register reads (reliable across DS1302 clone variants)
+        uint8_t s = DS1302_ReadReg(DS1302_REG_SECONDS);
+        uint8_t m = DS1302_ReadReg(DS1302_REG_MINUTES);
+        uint8_t h = DS1302_ReadReg(DS1302_REG_HOURS);
+        uint8_t d = DS1302_ReadReg(DS1302_REG_DATE);
+        uint8_t mo = DS1302_ReadReg(DS1302_REG_MONTH);
+        uint8_t w = DS1302_ReadReg(DS1302_REG_DAY);
+        uint8_t y = DS1302_ReadReg(DS1302_REG_YEAR);
+
+        ds1302_dbg_sec_reg = s;
+
+        dt->sec     = bcd_to_dec(s & 0x7F);
+        dt->min     = bcd_to_dec(m & 0x7F);
+        dt->hour    = bcd_to_dec(h & 0x3F);
+        dt->day     = bcd_to_dec(d & 0x3F);
+        dt->month   = bcd_to_dec(mo & 0x1F);
+        dt->weekday = bcd_to_dec(w & 0x07);
+        dt->year    = 2000 + bcd_to_dec(y);
+
+        if (dt->month == 0 || dt->month > 12 || dt->day == 0 || dt->day > 31 ||
+            dt->hour > 23 || dt->min > 59 || dt->sec > 59)
+        {
+            ds1302_dbg_last_ok = 0;
+            return 0; // Data read is invalid / hardware not responding
+        }
     }
 
+    ds1302_dbg_last_ok = 1;
     return 1;
 }
 

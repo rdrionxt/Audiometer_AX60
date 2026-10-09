@@ -27,7 +27,7 @@
 #include "usbd_msc.h"
 
 /* USER CODE BEGIN Includes */
-
+#include "main.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,7 +40,6 @@
 /* USER CODE END PV */
 
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
-void Error_Handler(void);
 
 /* External functions --------------------------------------------------------*/
 void SystemClock_Config(void);
@@ -82,7 +81,7 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef* pcdHandle)
     PeriphClkInitStruct.Clk48ClockSelection = RCC_CLK48CLKSOURCE_PLLQ;
     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
     {
-      Error_Handler();
+      Error_Handler_Ex(__FILE__, __LINE__, 201);
     }
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -100,15 +99,11 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef* pcdHandle)
     /* Peripheral clock enable */
     __HAL_RCC_USB_OTG_FS_CLK_ENABLE();
 
-    /* Peripheral interrupt init */
-    HAL_NVIC_SetPriority(OTG_FS_IRQn, 4, 0);
+    /* Peripheral interrupt init: Priority 0 ensures USB enumeration packets are serviced without delay */
+    HAL_NVIC_SetPriority(OTG_FS_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(OTG_FS_IRQn);
   /* USER CODE BEGIN USB_OTG_FS_MspInit 1 */
-    /* I2S TXE is NVIC 5; USART1 DWIN is 2; SysTick is 15 (GROUP_4 = all preempt).
-     * USB@6 let I2S preempt USB and broke CDC after BSP_I2S_Start.
-     * USB@4 preempts I2S (enum) but stays below USART1 (DWIN RX during enum).
-     * USB@0 also blocks USART1 — that froze the panel on cable plug. */
-    HAL_NVIC_SetPriority(OTG_FS_IRQn, 4, 0);
+
   /* USER CODE END USB_OTG_FS_MspInit 1 */
   }
 }
@@ -358,7 +353,7 @@ USBD_StatusTypeDef USBD_LL_Init(USBD_HandleTypeDef *pdev)
   hpcd_USB_OTG_FS.Init.use_dedicated_ep1 = DISABLE;
   if (HAL_PCD_Init(&hpcd_USB_OTG_FS) != HAL_OK)
   {
-    Error_Handler( );
+    Error_Handler_Ex(__FILE__, __LINE__, 202);
   }
 
 #if (USE_HAL_PCD_REGISTER_CALLBACKS == 1U)
@@ -376,13 +371,9 @@ USBD_StatusTypeDef USBD_LL_Init(USBD_HandleTypeDef *pdev)
   HAL_PCD_RegisterIsoOutIncpltCallback(&hpcd_USB_OTG_FS, PCD_ISOOUTIncompleteCallback);
   HAL_PCD_RegisterIsoInIncpltCallback(&hpcd_USB_OTG_FS, PCD_ISOINIncompleteCallback);
 #endif /* USE_HAL_PCD_REGISTER_CALLBACKS */
-  /* OTG FS FIFO RAM is 320 x 32-bit words. TX FIFO index = IN endpoint number.
-   * EP0=FIFO0, unused EP1=FIFO1, CDC data IN 0x82=FIFO2, CDC CMD 0x83=FIFO3. */
   HAL_PCDEx_SetRxFiFo(&hpcd_USB_OTG_FS, 0x80);
   HAL_PCDEx_SetTxFiFo(&hpcd_USB_OTG_FS, 0, 0x40);
-  HAL_PCDEx_SetTxFiFo(&hpcd_USB_OTG_FS, 1, 0x10);
-  HAL_PCDEx_SetTxFiFo(&hpcd_USB_OTG_FS, 2, 0x40);
-  HAL_PCDEx_SetTxFiFo(&hpcd_USB_OTG_FS, 3, 0x10);
+  HAL_PCDEx_SetTxFiFo(&hpcd_USB_OTG_FS, 1, 0x80);
   }
   return USBD_OK;
 }

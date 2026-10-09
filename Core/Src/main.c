@@ -26,6 +26,7 @@
 #include "ds1302.h"
 #include "fram.h"
 #include "sd_card.h"
+#include "battery.h"
 #include "usb_device.h"
 #include "usbd_cdc_if.h"
 /* USER CODE END Includes */
@@ -71,6 +72,13 @@ volatile uint8_t fram_ok = 0;
 volatile uint8_t sd_ok = 0;
 DS1302_DateTime_t current_time;
 
+/* Live Expressions Time-Set Control (Edit in debugger & set trigger = 1) */
+volatile uint8_t rtc_set_time_trigger = 0;
+DS1302_DateTime_t rtc_time_to_set = {
+  .year = 2026, .month = 9, .day = 25,
+  .hour = 12, .min = 0, .sec = 0, .weekday = 5
+};
+
 /* Standard Audiometric Test Frequencies in Hz */
 const float AUDIOMETER_FREQUENCIES_HZ[11] = {
   125.0f, 250.0f, 500.0f, 750.0f, 1000.0f, 1500.0f,
@@ -78,7 +86,7 @@ const float AUDIOMETER_FREQUENCIES_HZ[11] = {
 };
 
 /* WebUI UART Circular RX Buffer */
-#define UART_RX_BUF_SIZE 256
+#define UART_RX_BUF_SIZE 512
 static volatile uint8_t uart_rx_buf[UART_RX_BUF_SIZE];
 static volatile uint16_t uart_rx_head = 0;
 static uint16_t uart_rx_tail = 0;
@@ -99,6 +107,7 @@ typedef struct {
   uint8_t talk_over_active;  /* 1 = Talk Over active */
   uint8_t talk_over_ext;     /* 0 = Internal Mic, 1 = External Talkover Mic */
   uint8_t talk_back_active;  /* 1 = Talk Back active */
+  uint8_t talk_back_dest;    /* 0 = Monitor Headphone (MH), 1 = Internal Speaker */
   uint8_t aux_active;        /* 1 = AUX Input active */
 } WebUI_State_t;
 
@@ -117,6 +126,7 @@ static WebUI_State_t audiometer_state = {
   .talk_over_active = 0,
   .talk_over_ext = 0,
   .talk_back_active = 0,
+  .talk_back_dest = 0,
   .aux_active = 0
 };
 
@@ -127,68 +137,129 @@ static float stim_env = 0.0f;      /* Silent on boot */
 static float mask_env = 0.0f;      /* Silent on boot */
 static uint32_t pulse_sample_count = 0;
 
-/* Interrupt-Driven Audio Ring Buffer for Glitch-Free Continuous Playback */
-#define AUDIO_RING_SIZE 1024
-static int16_t audio_ring_left[AUDIO_RING_SIZE];
-static int16_t audio_ring_right[AUDIO_RING_SIZE];
-static volatile uint16_t audio_ring_head = 0;
-static volatile uint16_t audio_ring_tail = 0;
-static volatile uint8_t  audio_tx_side = 0; /* 0 = Left, 1 = Right */
+/* Hardware Circular DMA Stereo Audio Buffer for Guaranteed 100% Left/Right Separation */
+DMA_HandleTypeDef hdma_spi1_tx;
 
-static inline uint16_t Audio_Ring_FreeFrames(void)
-{
-  uint16_t head = audio_ring_head;
-  uint16_t tail = audio_ring_tail;
-  uint16_t used = (head >= tail) ? (head - tail) : (uint16_t)(AUDIO_RING_SIZE - (tail - head));
-  return (uint16_t)(AUDIO_RING_SIZE - 1U - used);
-}
+#define DMA_AUDIO_HALF_FRAMES  256
+#define DMA_AUDIO_TOTAL_FRAMES (DMA_AUDIO_HALF_FRAMES * 2)   /* 512 stereo frames */
+#define DMA_AUDIO_BUF_SIZE     (DMA_AUDIO_TOTAL_FRAMES * 2)  /* 1024 uint16_t samples (512 Left + 512 Right) */
 
-static inline void Audio_Ring_WriteFrame(int16_t left, int16_t right)
+static int16_t dma_audio_buffer[DMA_AUDIO_BUF_SIZE] __attribute__((aligned(4)));
+
+/**
+  * @brief  Populates half of the circular DMA buffer with interleaved Left and Right audio frames.
+  *         This eliminates CPU underflow, phase slipping, and channel swapping completely.
+  */
+static void Fill_Audio_Buffer_Half(int16_t *dest, uint16_t num_frames)
 {
-  uint16_t head = audio_ring_head;
-  audio_ring_left[head] = left;
-  audio_ring_right[head] = right;
-  audio_ring_head = (uint16_t)((head + 1U) % AUDIO_RING_SIZE);
+  uint8_t stim_active = (audiometer_state.cont_active || audiometer_state.stim1_pressed);
+  uint8_t mask_active = ((audiometer_state.masking_db > -10) && (audiometer_state.cont_active || audiometer_state.stim2_pressed));
+
+  float target_stim = stim_active ? 1.0f : 0.0f;
+  float target_mask = mask_active ? 1.0f : 0.0f;
+
+  /* Handle pulse modulation if pulse mode is enabled */
+  if (audiometer_state.pulse_active && stim_active)
+  {
+    if (pulse_sample_count >= 19200) /* 400 ms period at 48 kHz */
+    {
+      pulse_sample_count = 0;
+    }
+    if (pulse_sample_count >= 9600)  /* 200 ms OFF, 200 ms ON */
+    {
+      target_stim = 0.0f;
+    }
+    pulse_sample_count += num_frames;
+  }
+
+  for (uint16_t i = 0; i < num_frames; i++)
+  {
+    /* Smooth 10 ms digital envelope ramping */
+    if (stim_env < target_stim)
+    {
+      stim_env += 0.002f;
+      if (stim_env > target_stim) stim_env = target_stim;
+    }
+    else if (stim_env > target_stim)
+    {
+      stim_env -= 0.002f;
+      if (stim_env < target_stim) stim_env = target_stim;
+    }
+
+    if (mask_env < target_mask)
+    {
+      mask_env += 0.002f;
+      if (mask_env > target_mask) mask_env = target_mask;
+    }
+    else if (mask_env > target_mask)
+    {
+      mask_env -= 0.002f;
+      if (mask_env < target_mask) mask_env = target_mask;
+    }
+
+    int16_t sample_stim = (stim_env > 0.0001f) ? Audio_Process_Channel(&ch_stim) : 0;
+    int16_t sample_mask = (mask_env > 0.0001f) ? Audio_Process_Channel(&ch_mask) : 0;
+
+    /* Apply digital headroom (0.75f = -2.5 dBFS) to prevent analog op-amp rail saturation and crosstalk */
+    int16_t out_stim = (int16_t)((float)sample_stim * stim_env * 0.75f);
+    int16_t out_mask = (int16_t)((float)sample_mask * mask_env * 0.75f);
+
+    int16_t left_sample = 0;
+    int16_t right_sample = 0;
+
+    if (audiometer_state.ear_sel == AUDIO_EAR_LEFT)
+    {
+      /* CH1 (Stimulus: Puretone/Warble) -> Left, CH2 (Masking: Noise) -> Right */
+      left_sample  = out_stim;
+      right_sample = out_mask;
+    }
+    else /* AUDIO_EAR_RIGHT */
+    {
+      /* CH1 (Stimulus: Puretone/Warble) -> Right, CH2 (Masking: Noise) -> Left */
+      left_sample  = out_mask;
+      right_sample = out_stim;
+    }
+
+    /* Interleaved Philips I2S Stereo format:
+     * Even index [2*i]     = Left Channel  (WS / LRCK = LOW)
+     * Odd index  [2*i + 1] = Right Channel (WS / LRCK = HIGH)
+     */
+    dest[2 * i]     = left_sample;
+    dest[2 * i + 1] = right_sample;
+  }
 }
 
 /**
-  * @brief  SPI1 / I2S1 Hardware TXE Interrupt Service Routine.
-  *         Transmits Left and Right samples directly from ring buffer with zero latency.
+  * @brief  DMA Transfer Half Complete Callback - refills first half of buffer.
   */
-void Audio_I2S_ISR_Handler(void)
+void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-  if (SPI1->SR & SPI_SR_TXE)
+  if (hi2s->Instance == SPI1)
   {
-    uint16_t tail = audio_ring_tail;
-    uint16_t head = audio_ring_head;
+    Fill_Audio_Buffer_Half(&dma_audio_buffer[0], DMA_AUDIO_HALF_FRAMES);
+  }
+}
 
-    if (audio_tx_side == 0)
-    {
-      /* Channel Left (LRCK = LOW) */
-      if (tail != head)
-      {
-        SPI1->DR = (uint16_t)audio_ring_left[tail];
-      }
-      else
-      {
-        SPI1->DR = 0; /* Underflow */
-      }
-      audio_tx_side = 1;
-    }
-    else
-    {
-      /* Channel Right (LRCK = HIGH) */
-      if (tail != head)
-      {
-        SPI1->DR = (uint16_t)audio_ring_right[tail];
-        audio_ring_tail = (uint16_t)((tail + 1U) % AUDIO_RING_SIZE);
-      }
-      else
-      {
-        SPI1->DR = 0; /* Underflow */
-      }
-      audio_tx_side = 0;
-    }
+/**
+  * @brief  DMA Transfer Complete Callback - refills second half of buffer.
+  */
+void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
+{
+  if (hi2s->Instance == SPI1)
+  {
+    Fill_Audio_Buffer_Half(&dma_audio_buffer[DMA_AUDIO_BUF_SIZE / 2], DMA_AUDIO_HALF_FRAMES);
+  }
+}
+
+/**
+  * @brief  I2S Error Callback - handles underruns and cleanly restarts DMA transfer.
+  */
+void HAL_I2S_ErrorCallback(I2S_HandleTypeDef *hi2s)
+{
+  if (hi2s->Instance == SPI1)
+  {
+    HAL_I2S_DMAStop(hi2s);
+    HAL_I2S_Transmit_DMA(hi2s, (uint16_t *)dma_audio_buffer, DMA_AUDIO_BUF_SIZE);
   }
 }
 /* USER CODE END PV */
@@ -226,16 +297,11 @@ int main(void)
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
+  dbg_main_step = 1;
 
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
-
-  /* Configure the system clock */
+  /* Configure the system clock (matches audiometer_basic: 84MHz HCLK, 42MHz APB1/2, 48MHz USB) */
   SystemClock_Config();
-
-  /* Configure the peripherals common clocks (SAI1 & SAI2 audio clock) */
-  PeriphCommonClock_Config();
+  dbg_main_step = 2;
 
   /* USER CODE BEGIN SysInit */
 
@@ -245,24 +311,42 @@ int main(void)
   MX_GPIO_Init();
   MX_SPI3_Init();
   MX_I2S1_Init();
-  MX_SAI1_Init();
-  MX_SAI2_Init();
   MX_USART2_UART_Init();
   MX_USART3_UART_Init();
+  dbg_main_step = 4;
   /* USER CODE BEGIN 2 */
 
   /* 0. Initialize Storage & RTC peripherals */
-  ds1302_ok = (DS1302_Init() == 0);
+  ds1302_ok = (DS1302_Init() == 1);
+  if (ds1302_ok)
+  {
+    if (!DS1302_GetTime(&current_time))
+    {
+      /* Seed with default valid time if uninitialized / cold boot */
+      DS1302_DateTime_t init_time = {
+        .year = 2026, .month = 9, .day = 25,
+        .hour = 11, .min = 45, .sec = 0, .weekday = 5
+      };
+      DS1302_SetTime(&init_time);
+      DS1302_GetTime(&current_time);
+    }
+  }
   fram_ok   = (FRAM_Test() == FRAM_OK);
   sd_ok     = (SD_Init() == SD_OK);
+  dbg_main_step = 5;
 
-  /* Initialize USB FS Device (Composite CDC + MSC) */
+  /* Initialize USB FS Device (Composite CDC + MSC) - identical to audiometer_basic */
+  dbg_main_step = 6;
   MX_USB_DEVICE_Init();
+  dbg_main_step = 7;
 
-  /* 1. Turn on default transducers (AC Left/Right, Insert Earphone, Bone Conductor, Free Field) */
-  HAL_GPIO_WritePin(GPIOE, BC_EN_Pin | FF_EN_Pin | BC_L_R_EN_Pin | INSERT_EP_EN_Pin | AC_Left_EN_Pin | AC_Right_EN_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(INTERNAL_SPK_EN_GPIO_Port, INTERNAL_SPK_EN_Pin, GPIO_PIN_SET);
+  /* Initialize Battery Monitoring (PA0/ADC1_IN0) & DC Power Detection (PA1) */
+  BSP_Battery_Init();
+
+  /* 1. Turn on default transducers (AC Left/Right) and ensure monitors OFF */
+  HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOE, BC_EN_Pin | FF_EN_Pin | INSERT_EP_EN_Pin | MH_EN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(INTERNAL_SPK_EN_GPIO_Port, INTERNAL_SPK_EN_Pin, GPIO_PIN_RESET);
 
   /* 2. Enable OPA headphone amplifier (PB2) */
   HAL_GPIO_WritePin(OPA_EN_GPIO_Port, OPA_EN_Pin, GPIO_PIN_SET);
@@ -280,9 +364,9 @@ int main(void)
   /* 5. Configure initial audio state and PGA2311 volume (1000 Hz, 90 dB HL) */
   WebUI_UpdateAudioSettings();
 
-  /* 6. Enable Hardware I2S1 Master Transmitter and TXE interrupt */
-  __HAL_I2S_ENABLE(&hi2s1);
-  __HAL_I2S_ENABLE_IT(&hi2s1, I2S_IT_TXE);
+  /* 6. Start continuous circular DMA stereo audio streaming (100% Left/Right separation) */
+  memset(dma_audio_buffer, 0, sizeof(dma_audio_buffer));
+  HAL_I2S_Transmit_DMA(&hi2s1, (uint16_t *)dma_audio_buffer, DMA_AUDIO_BUF_SIZE);
 
   /* USER CODE END 2 */
 
@@ -293,106 +377,89 @@ int main(void)
     /* 1. Poll UART for WebUI commands and PB3 patient switch */
     WebUI_Poll();
 
-    /* 2. Determine target digital envelopes */
+    /* 1b. Periodic RTC clock read & telemetry broadcast (every 1000 ms) */
+    static uint32_t last_rtc_tick = 0;
+    if (HAL_GetTick() - last_rtc_tick >= 1000)
+    {
+      last_rtc_tick = HAL_GetTick();
+      if (ds1302_ok)
+      {
+        if (DS1302_GetTime(&current_time))
+        {
+          /* Send RTC Frame: 0xAA, 0x54, HH, MM, SS, Day, Month, Year(00-99), Weekday, 0x55 */
+          uint8_t rtc_frame[10] = {
+            0xAA,
+            0x54,
+            current_time.hour,
+            current_time.min,
+            current_time.sec,
+            current_time.day,
+            current_time.month,
+            (uint8_t)(current_time.year >= 2000 ? (current_time.year - 2000) : current_time.year),
+            current_time.weekday,
+            0x55
+          };
+          Uart_Send_Response(rtc_frame, 10);
+        }
+      }
+    }
+
+    /* 1c. Check if user requested to set RTC time via Live Expressions in debugger */
+    if (rtc_set_time_trigger)
+    {
+      rtc_set_time_trigger = 0;
+      if (DS1302_SetTime(&rtc_time_to_set))
+      {
+        current_time = rtc_time_to_set;
+        ds1302_ok = 1;
+      }
+    }
+
+    /* 1d. Periodic Battery sampling & DC Power Detection telemetry (every 1000 ms) */
+    static uint32_t last_bat_tick = 0;
+    if (HAL_GetTick() - last_bat_tick >= 1000)
+    {
+      last_bat_tick = HAL_GetTick();
+      uint8_t is_presenting = (audiometer_state.cont_active || audiometer_state.stim1_pressed ||
+                               ((audiometer_state.masking_db > -10) && (audiometer_state.cont_active || audiometer_state.stim2_pressed)));
+      Battery_Poll(HAL_GetTick(), is_presenting);
+
+      const Battery_Snapshot_t *bs = Model_Battery_Get();
+      if (bs != NULL)
+      {
+        /* Send Battery Telemetry Frame: 0xAA, 0x56, DC, Percent, Bars, Mv_High, Mv_Low, Scenario, 0x55 (9 bytes) */
+        uint8_t bat_frame[9] = {
+          0xAA,
+          0x56,
+          bs->dc_plugged,
+          bs->percent,
+          bs->bars,
+          (uint8_t)((bs->pack_mv_est >> 8) & 0xFF),
+          (uint8_t)(bs->pack_mv_est & 0xFF),
+          (uint8_t)bs->scenario,
+          0x55
+        };
+        Uart_Send_Response(bat_frame, 9);
+      }
+    }
+
+    /* 2. Tone vs Mic/Aux Priority: If tone presentation state changes, re-evaluate audio & PGA settings */
     uint8_t stim_active = (audiometer_state.cont_active || audiometer_state.stim1_pressed);
     uint8_t mask_active = ((audiometer_state.masking_db > -10) && (audiometer_state.cont_active || audiometer_state.stim2_pressed));
-
-    /* Tone vs Mic/Aux Priority: If tone presenting, PA9 is LOW; else if Mic/Aux active, PA9 is HIGH */
-    uint8_t tone_presenting = (stim_active || mask_active);
-    static uint8_t last_tone_presenting = 0xFF;
-    if (tone_presenting != last_tone_presenting)
+    static uint8_t last_stim_presenting = 0xFF;
+    static uint8_t last_mask_presenting = 0xFF;
+    if (stim_active != last_stim_presenting || mask_active != last_mask_presenting)
     {
-      last_tone_presenting = tone_presenting;
-      if (tone_presenting)
-      {
-        HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
-      }
-      else if (audiometer_state.talk_over_active || audiometer_state.talk_back_active || audiometer_state.aux_active)
-      {
-        HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_SET);
-      }
-      else
-      {
-        HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
-      }
-    }
-
-    float target_stim = stim_active ? 0.8f : 0.0f;
-    float target_mask = mask_active ? 0.8f : 0.0f;
-
-    /* Handle pulse modulation if pulse mode is enabled */
-    if (audiometer_state.pulse_active && stim_active)
-    {
-      if (pulse_sample_count >= 19200) /* 400 ms period at 48 kHz */
-      {
-        pulse_sample_count = 0;
-      }
-      if (pulse_sample_count >= 9600)  /* 200 ms OFF, 200 ms ON */
-      {
-        target_stim = 0.0f;
-      }
-      pulse_sample_count += 64;
-    }
-
-    /* 3. Keep audio ring buffer populated (up to 64 frames per iteration) */
-    uint16_t free_frames = Audio_Ring_FreeFrames();
-    uint16_t to_gen = (free_frames >= 64) ? 64 : free_frames;
-
-    for (uint16_t i = 0; i < to_gen; i++)
-    {
-      /* Smooth 10 ms digital envelope ramping */
-      if (stim_env < target_stim)
-      {
-        stim_env += 0.002f;
-        if (stim_env > target_stim) stim_env = target_stim;
-      }
-      else if (stim_env > target_stim)
-      {
-        stim_env -= 0.002f;
-        if (stim_env < target_stim) stim_env = target_stim;
-      }
-
-      if (mask_env < target_mask)
-      {
-        mask_env += 0.002f;
-        if (mask_env > target_mask) mask_env = target_mask;
-      }
-      else if (mask_env > target_mask)
-      {
-        mask_env -= 0.002f;
-        if (mask_env < target_mask) mask_env = target_mask;
-      }
-
-      int16_t sample_stim = (stim_env > 0.0001f) ? Audio_Process_Channel(&ch_stim) : 0;
-      int16_t sample_mask = (mask_env > 0.0001f) ? Audio_Process_Channel(&ch_mask) : 0;
-
-      int16_t out_stim = (int16_t)((float)sample_stim * stim_env);
-      int16_t out_mask = (int16_t)((float)sample_mask * mask_env);
-
-      int16_t left_out = 0;
-      int16_t right_out = 0;
-
-      if (audiometer_state.ear_sel == AUDIO_EAR_LEFT)
-      {
-        /* CH1 (Stimulus: Puretone/Warble) -> Left, CH2 (Masking: Noise) -> Right */
-        left_out  = out_stim;
-        right_out = out_mask;
-      }
-      else /* AUDIO_EAR_RIGHT */
-      {
-        /* CH1 (Stimulus: Puretone/Warble) -> Right, CH2 (Masking: Noise) -> Left */
-        left_out  = out_mask;
-        right_out = out_stim;
-      }
-
-      Audio_Ring_WriteFrame(left_out, right_out);
+      last_stim_presenting = stim_active;
+      last_mask_presenting = mask_active;
+      WebUI_UpdateAudioSettings();
     }
   }
   /* USER CODE END 3 */
 }
 
 /**
-  * @brief System Clock Configuration
+  * @brief System Clock Configuration (Robust 4-stage fallback with diagnostics)
   * @retval None
   */
 void SystemClock_Config(void)
@@ -405,8 +472,7 @@ void SystemClock_Config(void)
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
-  /** First attempt: Try External High Speed Oscillator (HSE 8MHz) with PLL
-  */
+  /* Stage 1: Try External High Speed Oscillator (HSE 8MHz Crystal) */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -417,26 +483,53 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLQ = 7;
   RCC_OscInitStruct.PLL.PLLR = 2;
 
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) == HAL_OK)
   {
-    /* HSE crystal failed to start or timed out -> Fallback seamlessly to Internal 16MHz RC (HSI) */
-    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-    RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-    RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-    RCC_OscInitStruct.HSEState = RCC_HSE_OFF;
+    dbg_clock_source = 1; /* HSE Crystal 8MHz OK */
+  }
+  else
+  {
+    /* Stage 2: Try HSE Bypass (in case board uses external clock generator) */
+    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+    RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
     RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-    RCC_OscInitStruct.PLL.PLLM = 16;
+    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+    RCC_OscInitStruct.PLL.PLLM = 8;
     RCC_OscInitStruct.PLL.PLLN = 336;
     RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
     RCC_OscInitStruct.PLL.PLLQ = 7;
     RCC_OscInitStruct.PLL.PLLR = 2;
 
-    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) == HAL_OK)
     {
-      /* If PLL fails, run directly on raw HSI without PLL */
-      RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
-      HAL_RCC_OscConfig(&RCC_OscInitStruct);
+      dbg_clock_source = 2; /* HSE Bypass OK */
+    }
+    else
+    {
+      /* Stage 3: Seamless fallback to Internal 16MHz RC (HSI) with PLL (168MHz SYSCLK, 48MHz USB) */
+      RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+      RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+      RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+      RCC_OscInitStruct.HSEState = RCC_HSE_OFF;
+      RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+      RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+      RCC_OscInitStruct.PLL.PLLM = 16;
+      RCC_OscInitStruct.PLL.PLLN = 336;
+      RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+      RCC_OscInitStruct.PLL.PLLQ = 7;
+      RCC_OscInitStruct.PLL.PLLR = 2;
+
+      if (HAL_RCC_OscConfig(&RCC_OscInitStruct) == HAL_OK)
+      {
+        dbg_clock_source = 3; /* HSI 16MHz PLL OK (VCO=336MHz, USB=48MHz, SYSCLK=168MHz) */
+      }
+      else
+      {
+        /* Stage 4: Raw HSI without PLL */
+        RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+        HAL_RCC_OscConfig(&RCC_OscInitStruct);
+        dbg_clock_source = 4; /* Raw HSI */
+      }
     }
   }
 
@@ -444,66 +537,39 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  
+
   if ((RCC->CR & RCC_CR_PLLRDY) == RCC_CR_PLLRDY)
   {
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-    RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
-    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
-    HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5);
+    RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV2;  /* HCLK = 84 MHz (identical to audiometer_basic) */
+    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;   /* APB1 = 42 MHz (identical to audiometer_basic) */
+    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;   /* APB2 = 42 MHz (identical to audiometer_basic) */
+
+    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+    {
+      Error_Handler_Ex(__FILE__, __LINE__, 101);
+    }
   }
   else
   {
-    /* Fallback directly to HSI 16MHz */
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
     RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
     RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
     RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-    HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0);
+
+    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+    {
+      Error_Handler_Ex(__FILE__, __LINE__, 102);
+    }
   }
 }
 
 /**
-  * @brief Peripherals Common Clock Configuration (SAI1 & SAI2 Audio Clock)
+  * @brief Peripherals Common Clock Configuration (Unused - PLLI2S is configured in HAL_I2S_MspInit)
   * @retval None
   */
 void PeriphCommonClock_Config(void)
 {
-  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
-
-  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_SAI1 | RCC_PERIPHCLK_SAI2 | RCC_PERIPHCLK_I2S_APB2;
-
-  /* If running on HSI (16MHz), PLLSAIM/PLLI2SM = 16 (16MHz / 16 = 1MHz VCO input)
-   * If running on HSE (8MHz),  PLLSAIM/PLLI2SM = 8  (8MHz / 8 = 1MHz VCO input) */
-  if ((RCC->PLLCFGR & RCC_PLLCFGR_PLLSRC) == RCC_PLLCFGR_PLLSRC_HSI)
-  {
-    PeriphClkInitStruct.PLLSAI.PLLSAIM = 16;
-    PeriphClkInitStruct.PLLI2S.PLLI2SM = 16;
-  }
-  else
-  {
-    PeriphClkInitStruct.PLLSAI.PLLSAIM = 8;
-    PeriphClkInitStruct.PLLI2S.PLLI2SM = 8;
-  }
-
-  PeriphClkInitStruct.PLLSAI.PLLSAIN = 192;
-  PeriphClkInitStruct.PLLSAI.PLLSAIQ = 2;
-  PeriphClkInitStruct.PLLSAI.PLLSAIP = RCC_PLLSAIP_DIV2;
-  PeriphClkInitStruct.PLLSAIDivQ = 1;
-  PeriphClkInitStruct.Sai1ClockSelection = RCC_SAI1CLKSOURCE_PLLSAI;
-  PeriphClkInitStruct.Sai2ClockSelection = RCC_SAI2CLKSOURCE_PLLSAI;
-
-  /* Configure PLLI2S for Hardware I2S1 (APB2): 192 MHz VCO / 2 = 96 MHz I2S_CLK */
-  PeriphClkInitStruct.PLLI2S.PLLI2SN = 192;
-  PeriphClkInitStruct.PLLI2S.PLLI2SP = RCC_PLLI2SP_DIV2;
-  PeriphClkInitStruct.PLLI2S.PLLI2SR = 2;
-  PeriphClkInitStruct.PLLI2S.PLLI2SQ = 2;
-  PeriphClkInitStruct.PLLI2SDivQ = 1;
-  PeriphClkInitStruct.I2sApb2ClockSelection = RCC_I2SAPB2CLKSOURCE_PLLI2S;
-
-  /* Configure SAI & I2S peripheral clocks */
-  HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct);
 }
 
 /**
@@ -516,7 +582,7 @@ void MX_I2S1_Init(void)
   hi2s1.Instance = SPI1;
   hi2s1.Init.Mode = I2S_MODE_MASTER_TX;
   hi2s1.Init.Standard = I2S_STANDARD_PHILIPS;
-  hi2s1.Init.DataFormat = I2S_DATAFORMAT_16B;
+  hi2s1.Init.DataFormat = I2S_DATAFORMAT_16B_EXTENDED;
   hi2s1.Init.MCLKOutput = I2S_MCLKOUTPUT_DISABLE;
   hi2s1.Init.AudioFreq = I2S_AUDIOFREQ_48K;
   hi2s1.Init.CPOL = I2S_CPOL_LOW;
@@ -524,107 +590,16 @@ void MX_I2S1_Init(void)
   hi2s1.Init.FullDuplexMode = I2S_FULLDUPLEXMODE_DISABLE;
   if (HAL_I2S_Init(&hi2s1) != HAL_OK)
   {
-    Error_Handler();
+    Error_Handler_Ex(__FILE__, __LINE__, 103);
   }
 }
 
-/**
-  * @brief SAI1 Initialization Function (Configured for PCM5102A Stereo DAC Transmitter - PE2/PE5/PE4/PE6)
-  * @param None
-  * @retval None
-  */
 void MX_SAI1_Init(void)
 {
-  /* USER CODE BEGIN SAI1_Init 0 */
-
-  /* USER CODE END SAI1_Init 0 */
-
-  /* USER CODE BEGIN SAI1_Init 1 */
-
-  /* USER CODE END SAI1_Init 1 */
-
-  /* Configure SAI1 Block A as Master Transmitter for PCM5102A */
-  hsai_BlockA1.Instance = SAI1_Block_A;
-  hsai_BlockA1.Init.AudioMode = SAI_MODEMASTER_TX;
-  hsai_BlockA1.Init.Synchro = SAI_ASYNCHRONOUS;
-  hsai_BlockA1.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
-  hsai_BlockA1.Init.NoDivider = SAI_MASTERDIVIDER_ENABLE;
-  hsai_BlockA1.Init.FIFOThreshold = SAI_FIFOTHRESHOLD_EMPTY;
-  hsai_BlockA1.Init.AudioFrequency = SAI_AUDIO_FREQUENCY_48K;
-  hsai_BlockA1.Init.Protocol = SAI_FREE_PROTOCOL;
-  hsai_BlockA1.Init.DataSize = SAI_DATASIZE_32;
-  hsai_BlockA1.Init.FirstBit = SAI_FIRSTBIT_MSB;
-  hsai_BlockA1.Init.ClockStrobing = SAI_CLOCKSTROBING_FALLINGEDGE;
-  hsai_BlockA1.Init.SynchroExt = SAI_SYNCEXT_DISABLE;
-  hsai_BlockA1.Init.MonoStereoMode = SAI_STEREOMODE;
-  hsai_BlockA1.Init.CompandingMode = SAI_NOCOMPANDING;
-  hsai_BlockA1.Init.TriState = SAI_OUTPUT_NOTRELEASED;
-
-  /* Standard Philips I2S Frame: Total Frame Length = 64 (32 bits per channel)
-   * Active Frame Length = 32 (Half frame for Left channel)
-   * Channel Identification: FS Low for Left, High for Right
-   * 1-bit delay (Before first data bit)
-   */
-  hsai_BlockA1.FrameInit.FrameLength = 64;
-  hsai_BlockA1.FrameInit.ActiveFrameLength = 32;
-  hsai_BlockA1.FrameInit.FSDefinition = SAI_FS_CHANNEL_IDENTIFICATION;
-  hsai_BlockA1.FrameInit.FSPolarity = SAI_FS_ACTIVE_LOW;
-  hsai_BlockA1.FrameInit.FSOffset = SAI_FS_BEFOREFIRSTBIT;
-
-  /* Slot Configuration: 2 Slots (Left = Slot 0, Right = Slot 1), 32-bit slot width */
-  hsai_BlockA1.SlotInit.FirstBitOffset = 0;
-  hsai_BlockA1.SlotInit.SlotSize = SAI_SLOTSIZE_32B;
-  hsai_BlockA1.SlotInit.SlotNumber = 2;
-  hsai_BlockA1.SlotInit.SlotActive = SAI_SLOTACTIVE_0 | SAI_SLOTACTIVE_1;
-
-  if (HAL_SAI_Init(&hsai_BlockA1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SAI1_Init 2 */
-
-  /* USER CODE END SAI1_Init 2 */
 }
 
-/**
-  * @brief SAI2 Initialization Function (Configured for PCM5102A Stereo DAC Transmitter - PD11/PD12)
-  * @param None
-  * @retval None
-  */
 void MX_SAI2_Init(void)
 {
-  /* Configure SAI2 Block A as Master Transmitter for PCM5102A on PD11 (SD) / PD12 (FS) */
-  hsai_BlockA2.Instance = SAI2_Block_A;
-  hsai_BlockA2.Init.AudioMode = SAI_MODEMASTER_TX;
-  hsai_BlockA2.Init.Synchro = SAI_ASYNCHRONOUS;
-  hsai_BlockA2.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
-  hsai_BlockA2.Init.NoDivider = SAI_MASTERDIVIDER_ENABLE;
-  hsai_BlockA2.Init.FIFOThreshold = SAI_FIFOTHRESHOLD_EMPTY;
-  hsai_BlockA2.Init.AudioFrequency = SAI_AUDIO_FREQUENCY_48K;
-  hsai_BlockA2.Init.Protocol = SAI_FREE_PROTOCOL;
-  hsai_BlockA2.Init.DataSize = SAI_DATASIZE_32;
-  hsai_BlockA2.Init.FirstBit = SAI_FIRSTBIT_MSB;
-  hsai_BlockA2.Init.ClockStrobing = SAI_CLOCKSTROBING_FALLINGEDGE;
-  hsai_BlockA2.Init.SynchroExt = SAI_SYNCEXT_DISABLE;
-  hsai_BlockA2.Init.MonoStereoMode = SAI_STEREOMODE;
-  hsai_BlockA2.Init.CompandingMode = SAI_NOCOMPANDING;
-  hsai_BlockA2.Init.TriState = SAI_OUTPUT_NOTRELEASED;
-
-  hsai_BlockA2.FrameInit.FrameLength = 64;
-  hsai_BlockA2.FrameInit.ActiveFrameLength = 32;
-  hsai_BlockA2.FrameInit.FSDefinition = SAI_FS_CHANNEL_IDENTIFICATION;
-  hsai_BlockA2.FrameInit.FSPolarity = SAI_FS_ACTIVE_LOW;
-  hsai_BlockA2.FrameInit.FSOffset = SAI_FS_BEFOREFIRSTBIT;
-
-  hsai_BlockA2.SlotInit.FirstBitOffset = 0;
-  hsai_BlockA2.SlotInit.SlotSize = SAI_SLOTSIZE_32B;
-  hsai_BlockA2.SlotInit.SlotNumber = 2;
-  hsai_BlockA2.SlotInit.SlotActive = SAI_SLOTACTIVE_0 | SAI_SLOTACTIVE_1;
-
-  if (HAL_SAI_Init(&hsai_BlockA2) != HAL_OK)
-  {
-    Error_Handler();
-  }
 }
 
 /**
@@ -645,13 +620,13 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /* Configure GPIO pin Output Level: Default Low */
-  HAL_GPIO_WritePin(GPIOE, BC_EN_Pin|WN_EN_Pin|FF_EN_Pin|BC_L_R_EN_Pin
+  HAL_GPIO_WritePin(GPIOE, BC_EN_Pin|WN_EN_Pin|FF_EN_Pin
                           |INSERT_EP_EN_Pin|AC_Left_EN_Pin|AC_Right_EN_Pin, GPIO_PIN_RESET);
 
-  HAL_GPIO_WritePin(GPIOA, STIMULUS1_Pin|PCM_MIC_Control_Pin|INTERNAL_SPK_EN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, PCM_MIC_Control_Pin|INTERNAL_SPK_EN_Pin, GPIO_PIN_RESET);
 
   HAL_GPIO_WritePin(GPIOB, RTC_EN_Pin|OPA_EN_Pin|RTC_CLK_Pin|RTC_IO_Pin
-                          |PGA_SCLK_Pin|PGA_MUTE_1_Pin|ZCEN_Pin|STIMULUS2_Pin, GPIO_PIN_RESET);
+                          |PGA_SCLK_Pin|PGA_MUTE_1_Pin|ZCEN_Pin, GPIO_PIN_RESET);
 
   HAL_GPIO_WritePin(GPIOD, TALKOVER_EN_Pin|MIC_AUX_EN_Pin|MIC_EN_Pin|PCM1808_DATA_EN_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(GPIOC, PGA_SDI_Pin, GPIO_PIN_RESET);
@@ -667,8 +642,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /* Configure Audio Route Enables: PE7, PE8, PE9, PE10, PE12, PE13, PE14 */
-  GPIO_InitStruct.Pin = BC_EN_Pin|WN_EN_Pin|FF_EN_Pin|BC_L_R_EN_Pin
+  /* Configure Audio Route Enables: PE7, PE8, PE9, PE12, PE13, PE14 */
+  GPIO_InitStruct.Pin = BC_EN_Pin|WN_EN_Pin|FF_EN_Pin
                           |INSERT_EP_EN_Pin|AC_Left_EN_Pin|AC_Right_EN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -682,16 +657,16 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /* Configure GPIO Outputs on Port A: PA6 (STIMULUS1), PA9 (PCM/MIC), PA15 (INTERNAL_SPK_EN) */
-  GPIO_InitStruct.Pin = STIMULUS1_Pin|PCM_MIC_Control_Pin|INTERNAL_SPK_EN_Pin;
+  /* Configure GPIO Outputs on Port A: PA9 (PCM/MIC), PA15 (INTERNAL_SPK_EN) */
+  GPIO_InitStruct.Pin = PCM_MIC_Control_Pin|INTERNAL_SPK_EN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /* Configure GPIO Outputs on Port B: RTC, OPA, PGA controls, Stimulus2 */
+  /* Configure GPIO Outputs on Port B: RTC, OPA, PGA controls */
   GPIO_InitStruct.Pin = RTC_EN_Pin|OPA_EN_Pin|RTC_CLK_Pin|RTC_IO_Pin
-                          |PGA_SCLK_Pin|PGA_CS1_Pin|PGA_MUTE_1_Pin|ZCEN_Pin|STIMULUS2_Pin;
+                          |PGA_SCLK_Pin|PGA_CS1_Pin|PGA_MUTE_1_Pin|ZCEN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -775,7 +750,7 @@ static void MX_SPI3_Init(void)
 }
 
 /**
-  * @brief USART2 Initialization Function (Configured for CH340G USB UART at 115200 8N1)
+  * @brief USART2 Initialization Function (Configured for Display / HMI Interface on PA2/PA3 at 115200 8N1)
   * @param None
   * @retval None
   */
@@ -798,7 +773,7 @@ void MX_USART2_UART_Init(void)
 }
 
 /**
-  * @brief USART3 Initialization Function (Configured for CH340G USB UART on PD8/PC5 at 115200 8N1)
+  * @brief USART3 Initialization Function (Configured for CH340G USB UART on PD8/PC5 at 115200 8N1; future Thermal Printer)
   * @param None
   * @retval None
   */
@@ -821,18 +796,14 @@ void MX_USART3_UART_Init(void)
 }
 
 /**
-  * @brief  Transmits response frame out to both USART2 and USART3.
+  * @brief  Transmits response frame out to USART3 (CH340G PC/WebUI) and USB CDC.
+  *         (Isolated from USART2 Proculus Display interface).
   */
 static void Uart_Send_Response(const uint8_t *data, uint16_t len)
 {
   for (uint16_t i = 0; i < len; i++)
   {
-    /* Send to USART2 */
-    uint32_t to2 = 5000;
-    while (!(huart2.Instance->SR & USART_SR_TXE) && --to2);
-    huart2.Instance->DR = data[i];
-
-    /* Send to USART3 */
+    /* Send to USART3 (PC / Web Serial interface) */
     uint32_t to3 = 5000;
     while (!(huart3.Instance->SR & USART_SR_TXE) && --to3);
     huart3.Instance->DR = data[i];
@@ -893,7 +864,7 @@ static void Hardware_Update_Audio_Path(uint8_t transducer, uint8_t ear)
     HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin, GPIO_PIN_SET);
 
     /* Disable BC, Insert, FreeField */
-    HAL_GPIO_WritePin(GPIOE, BC_EN_Pin | BC_L_R_EN_Pin | INSERT_EP_EN_Pin | FF_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOE, BC_EN_Pin | INSERT_EP_EN_Pin | FF_EN_Pin, GPIO_PIN_RESET);
   }
   else if (transducer == 1) /* BC (Bone Conduction + Insert Earphone Masking) */
   {
@@ -902,16 +873,6 @@ static void Hardware_Update_Audio_Path(uint8_t transducer, uint8_t ear)
 
     /* Enable Bone Conductor */
     HAL_GPIO_WritePin(GPIOE, BC_EN_Pin, GPIO_PIN_SET);
-
-    /* Steer Bone Conductor to test ear */
-    if (ear == AUDIO_EAR_RIGHT)
-    {
-      HAL_GPIO_WritePin(GPIOE, BC_L_R_EN_Pin, GPIO_PIN_SET);
-    }
-    else
-    {
-      HAL_GPIO_WritePin(GPIOE, BC_L_R_EN_Pin, GPIO_PIN_RESET);
-    }
 
     /* Enable Insert Earphone on non-test ear for masking */
     HAL_GPIO_WritePin(GPIOE, INSERT_EP_EN_Pin, GPIO_PIN_SET);
@@ -922,7 +883,7 @@ static void Hardware_Update_Audio_Path(uint8_t transducer, uint8_t ear)
     HAL_GPIO_WritePin(GPIOE, FF_EN_Pin, GPIO_PIN_SET);
 
     /* Disable AC, BC, Insert */
-    HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin | BC_EN_Pin | BC_L_R_EN_Pin | INSERT_EP_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin | BC_EN_Pin | INSERT_EP_EN_Pin, GPIO_PIN_RESET);
   }
 }
 
@@ -955,23 +916,33 @@ void WebUI_UpdateAudioSettings(void)
     Audio_Channel_Init(&ch_mask, (int)audiometer_state.ch2_noise, target_freq, 987654321);
   }
 
-  /* 3. Determine presentation status */
+  /* 3. Determine presentation status and PGA2311 volumes */
   uint8_t stim_presenting = (audiometer_state.cont_active || audiometer_state.stim1_pressed);
   uint8_t mask_presenting = ((audiometer_state.masking_db > -10) && (audiometer_state.cont_active || audiometer_state.stim2_pressed));
 
-  uint8_t stim_pga = stim_presenting ? DbToPGA2311(audiometer_state.puretone_db) : 0;
-  uint8_t mask_pga = mask_presenting ? DbToPGA2311(audiometer_state.masking_db) : 0;
-
   uint8_t new_left = 0, new_right = 0;
-  if (audiometer_state.ear_sel == AUDIO_EAR_LEFT)
+
+  if (audiometer_state.talk_over_active || audiometer_state.talk_back_active || audiometer_state.aux_active)
   {
-    new_left  = stim_pga;
-    new_right = mask_pga;
+    /* During Talkover, Talkback, or AUX: Unmute PGA2311 to unity gain (192 = 0 dB) */
+    new_left = 192;
+    new_right = 192;
   }
-  else /* AUDIO_EAR_RIGHT */
+  else
   {
-    new_left  = mask_pga;
-    new_right = stim_pga;
+    uint8_t stim_pga = stim_presenting ? DbToPGA2311(audiometer_state.puretone_db) : 0;
+    uint8_t mask_pga = mask_presenting ? DbToPGA2311(audiometer_state.masking_db) : 0;
+
+    if (audiometer_state.ear_sel == AUDIO_EAR_LEFT)
+    {
+      new_left  = stim_pga;
+      new_right = mask_pga;
+    }
+    else /* AUDIO_EAR_RIGHT */
+    {
+      new_left  = mask_pga;
+      new_right = stim_pga;
+    }
   }
 
   static uint8_t cur_pga_l = 0xFF;
@@ -985,63 +956,101 @@ void WebUI_UpdateAudioSettings(void)
     PGA2311_SetVolume(new_left, new_right);
   }
 
-  /* 4. Switch physical transducer relays based on selected OUT and Ear */
-  Hardware_Update_Audio_Path(audiometer_state.ch1_transducer, audiometer_state.ear_sel);
+  /* 4. Audio Routing, Transducer Relays, and Microphone Selection */
+  /* Always ensure OPA headphone amplifier is enabled */
+  HAL_GPIO_WritePin(OPA_EN_GPIO_Port, OPA_EN_Pin, GPIO_PIN_SET);
 
-  /* 5. Microphone, Talkover, Talkback, and AUX routing */
   if (audiometer_state.talk_over_active)
   {
-    if (audiometer_state.talk_over_ext)
-    {
-      /* External Talkover Mic: TALKOVER_EN = HIGH, MIC_EN = LOW, MIC_AUX_EN = LOW */
-      HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_SET);
-    }
-    else
-    {
-      /* Internal Talkover Mic: TALKOVER_EN = LOW, MIC_EN = LOW, MIC_AUX_EN = LOW */
-      HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
-    }
+    /* TALKOVER MODE (Examiner -> Patient):
+     * - Mic selection: External Mic = PD4 HIGH, Internal Mic = PD4 LOW
+     * - MIC_EN (PD6) = LOW, MIC_AUX_EN (PD5) = LOW
+     * - PCM_MIC_Control (PA9) = HIGH (select analog mic input instead of PCM DAC)
+     * - Patient Relays: AC Left (PE13) and AC Right (PE14) ON; BC (PE7), BC L/R (PE10), Insert (PE12), FF (PE9) OFF
+     * - Examiner Monitors: MH_EN (PE8) = LOW, INTERNAL_SPK_EN (PA15) = LOW
+     */
+    HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, audiometer_state.talk_over_ext ? GPIO_PIN_SET : GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_SET);
+
+    /* Turn ON AC Left & AC Right headphone relays for the patient */
+    HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin, GPIO_PIN_SET);
+    /* Disable BC, Insert Earphone, Free Field */
+    HAL_GPIO_WritePin(GPIOE, BC_EN_Pin | INSERT_EP_EN_Pin | FF_EN_Pin, GPIO_PIN_RESET);
+
+    /* Turn OFF examiner monitor outputs */
     HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(INTERNAL_SPK_EN_GPIO_Port, INTERNAL_SPK_EN_Pin, GPIO_PIN_RESET);
   }
   else if (audiometer_state.talk_back_active)
   {
-    /* Talkback: MIC_EN = HIGH, MIC_AUX_EN = LOW, TALKOVER_EN = LOW, Monitor Headphone (MH_EN) = HIGH */
-    HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
+    /* TALKBACK MODE (Patient -> Examiner):
+     * - Patient Mic Enable: MIC_EN (PD6) = HIGH
+     * - TALKOVER_EN (PD4) = LOW, MIC_AUX_EN (PD5) = LOW
+     * - PCM_MIC_Control (PA9) = HIGH (select analog mic input)
+     * - Patient Transducers: Turn OFF AC Left/Right (PE13/14), BC, Insert, FF to avoid acoustic feedback
+     * - Examiner Output:
+     *     If Internal Speaker selected (talk_back_dest == 1): INTERNAL_SPK_EN (PA15) = HIGH, MH_EN (PE8) = LOW
+     *     If MH selected (talk_back_dest == 0): MH_EN (PE8) = HIGH, INTERNAL_SPK_EN (PA15) = LOW
+     */
     HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_SET);
+
+    /* Turn OFF patient headphones/transducers */
+    HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin | BC_EN_Pin | INSERT_EP_EN_Pin | FF_EN_Pin, GPIO_PIN_RESET);
+
+    /* Route to selected examiner output */
+    if (audiometer_state.talk_back_dest == 1) /* Internal Speaker */
+    {
+      HAL_GPIO_WritePin(INTERNAL_SPK_EN_GPIO_Port, INTERNAL_SPK_EN_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_RESET);
+    }
+    else /* 0 = MH (Monitor Headphone) */
+    {
+      HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(INTERNAL_SPK_EN_GPIO_Port, INTERNAL_SPK_EN_Pin, GPIO_PIN_RESET);
+    }
   }
   else if (audiometer_state.aux_active)
   {
-    /* AUX input: MIC_AUX_EN = HIGH, TALKOVER_EN = LOW, MIC_EN = LOW, MH_EN = LOW */
+    /* AUX INPUT MODE:
+     * - Mic selection: MIC_AUX_EN (PD5) = SET
+     * - TALKOVER_EN (PD4) = RESET, MIC_EN (PD6) = RESET
+     * - MH_EN (PE8) = RESET, INTERNAL_SPK_EN (PA15) = RESET
+     * - PCM_MIC_Control (PA9) = SET (select analog auxiliary input mux)
+     * - Patient Relays: ONLY Air Conduction (AC Left & Right) active; BC, Insert, FF disabled
+     */
     HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(INTERNAL_SPK_EN_GPIO_Port, INTERNAL_SPK_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_SET);
+
+    /* Turn ON AC Left & AC Right headphone relays only */
+    HAL_GPIO_WritePin(GPIOE, AC_Left_EN_Pin | AC_Right_EN_Pin, GPIO_PIN_SET);
+    /* Disable BC, Insert Earphone, and Free Field */
+    HAL_GPIO_WritePin(GPIOE, BC_EN_Pin | INSERT_EP_EN_Pin | FF_EN_Pin, GPIO_PIN_RESET);
   }
   else
   {
-    /* Standby: all routing controls LOW */
+    /* STANDBY / NORMAL TESTING MODE:
+     * - Mic / Aux control pins RESET
+     * - Examiner monitor outputs RESET
+     * - PCM_MIC_Control (PA9) = RESET (LOW for PCM DAC tone synthesis)
+     * - Transducer relays follow current UI selection (AC / BC / FF)
+     */
     HAL_GPIO_WritePin(TALKOVER_EN_GPIO_Port, TALKOVER_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MIC_AUX_EN_GPIO_Port, MIC_AUX_EN_Pin, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MH_EN_GPIO_Port, MH_EN_Pin, GPIO_PIN_RESET);
-  }
+    HAL_GPIO_WritePin(INTERNAL_SPK_EN_GPIO_Port, INTERNAL_SPK_EN_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
 
-  /* 6. PCM / Mic Control Pin (PA9): LOW when tone presenting, HIGH when Mic/Aux active and no tone */
-  if (stim_presenting || mask_presenting)
-  {
-    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
-  }
-  else if (audiometer_state.talk_over_active || audiometer_state.talk_back_active || audiometer_state.aux_active)
-  {
-    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_SET);
-  }
-  else
-  {
-    HAL_GPIO_WritePin(PCM_MIC_Control_GPIO_Port, PCM_MIC_Control_Pin, GPIO_PIN_RESET);
+    Hardware_Update_Audio_Path(audiometer_state.ch1_transducer, audiometer_state.ear_sel);
   }
 }
 
@@ -1050,12 +1059,15 @@ void WebUI_UpdateAudioSettings(void)
   */
 void WebUI_Poll(void)
 {
-  /* 1. Poll Patient Response Switch on PB3 */
+  /* 1. Poll Patient Response Switch on PB3 with 50ms software debounce */
   static GPIO_PinState last_sw_state = GPIO_PIN_SET;
+  static uint32_t last_sw_time = 0;
+  uint32_t now = HAL_GetTick();
   GPIO_PinState sw = HAL_GPIO_ReadPin(PAT_RESPONSE_SW_GPIO_Port, PAT_RESPONSE_SW_Pin);
-  if (sw != last_sw_state)
+  if (sw != last_sw_state && (now - last_sw_time >= 50))
   {
     last_sw_state = sw;
+    last_sw_time = now;
     uint8_t resp = (sw == GPIO_PIN_RESET) ? 0x01 : 0x00; /* Active low (pull-up) */
     uint8_t frame[4] = { 0xAA, 0x50, resp, 0x55 };
     Uart_Send_Response(frame, 4);
@@ -1064,9 +1076,9 @@ void WebUI_Poll(void)
   /* 2. Process incoming serial bytes from rx_ring_buffer */
   while (1)
   {
-    uint16_t count = (uart_rx_head >= uart_rx_tail) ?
-                     (uart_rx_head - uart_rx_tail) :
-                     (UART_RX_BUF_SIZE - uart_rx_tail + uart_rx_head);
+    uint16_t head = uart_rx_head;
+    uint16_t tail = uart_rx_tail;
+    uint16_t count = (head >= tail) ? (head - tail) : (UART_RX_BUF_SIZE - tail + head);
 
     if (count < 8) break; /* Minimum frame size is 8 bytes */
 
@@ -1075,6 +1087,42 @@ void WebUI_Poll(void)
     {
       uart_rx_tail = (uart_rx_tail + 1) % UART_RX_BUF_SIZE;
       continue;
+    }
+
+    /* Check for 10-byte RTC Set Time command frame: 0xAA 0x53 HH MM SS DD MM YY WDAY 0x55 */
+    if (count >= 10 && uart_rx_buf[(uart_rx_tail + 1) % UART_RX_BUF_SIZE] == 0x53)
+    {
+      uint8_t temp[10];
+      for (uint8_t i = 0; i < 10; i++)
+      {
+        temp[i] = uart_rx_buf[(uart_rx_tail + i) % UART_RX_BUF_SIZE];
+      }
+      if (temp[9] == 0x55)
+      {
+        uart_rx_tail = (uart_rx_tail + 10) % UART_RX_BUF_SIZE;
+        DS1302_DateTime_t set_dt = {
+          .hour    = temp[2],
+          .min     = temp[3],
+          .sec     = temp[4],
+          .day     = temp[5],
+          .month   = temp[6],
+          .year    = (uint16_t)(2000 + temp[7]),
+          .weekday = temp[8]
+        };
+        if (DS1302_SetTime(&set_dt))
+        {
+          current_time = set_dt;
+          ds1302_ok = 1;
+          uint8_t ack[4] = { 0xAA, 0x53, 0x01, 0x55 };
+          Uart_Send_Response(ack, 4);
+        }
+        else
+        {
+          uint8_t nack[4] = { 0xAA, 0x53, 0x00, 0x55 };
+          Uart_Send_Response(nack, 4);
+        }
+        continue;
+      }
     }
 
     /* Check for 11-byte frame first */
@@ -1102,13 +1150,14 @@ void WebUI_Poll(void)
           audiometer_state.freq_idx = (temp[6] <= 10) ? temp[6] : 4;
           audiometer_state.ear_sel = (temp[7] == 0) ? AUDIO_EAR_LEFT : AUDIO_EAR_RIGHT;
 
-          /* Config byte: Bit 0 = CH1 Tone, Bits 1..2 = CH1 Transducer, Bit 3 = CH2 Noise, Bit 4 = Talkover Mic, Bit 5 = AUX */
+          /* Config byte: Bit 0 = CH1 Tone, Bits 1..2 = CH1 Transducer, Bit 3 = CH2 Noise, Bit 4 = Talkover Mic, Bit 5 = AUX, Bit 6 = Talkback Dest */
           uint8_t cfg = temp[8];
           audiometer_state.ch1_tone       = (cfg & 0x01) ? TONE_MODE_WARBLE : TONE_MODE_SINE;
           audiometer_state.ch1_transducer = (cfg >> 1) & 0x03; /* 0=AC, 1=BC, 2=FF */
           audiometer_state.ch2_noise      = (cfg & (1 << 3)) ? TONE_MODE_NBN : TONE_MODE_WHITE_NOISE;
           audiometer_state.talk_over_ext  = (cfg & (1 << 4)) ? 1 : 0;
           audiometer_state.aux_active     = (cfg & (1 << 5)) ? 1 : 0;
+          audiometer_state.talk_back_dest = (cfg & (1 << 6)) ? 1 : 0;
 
           audiometer_state.stim1_pressed = (b0 & (1 << 2)) ? 1 : 0;
           audiometer_state.stim2_pressed = (b0 & (1 << 3)) ? 1 : 0;
@@ -1752,6 +1801,27 @@ void PGA2311_SetVolume(uint8_t left_gain, uint8_t right_gain)
 
 /* USER CODE END 4 */
 
+/* Diagnostic State Tracking Variables (inspect in Live Expressions) */
+volatile const char *dbg_err_file = NULL;
+volatile uint32_t dbg_err_line = 0;
+volatile uint32_t dbg_err_code = 0;
+volatile uint32_t dbg_main_step = 0;
+volatile uint8_t dbg_clock_source = 0;
+
+/**
+  * @brief  Extended Error Handler recording file, line and error code
+  */
+void Error_Handler_Ex(const char *file, uint32_t line, uint32_t code)
+{
+  dbg_err_file = file;
+  dbg_err_line = line;
+  dbg_err_code = code;
+  __disable_irq();
+  while (1)
+  {
+  }
+}
+
 /**
   * @brief  This function is executed in case of error occurrence.
   * @retval None
@@ -1759,11 +1829,7 @@ void PGA2311_SetVolume(uint8_t left_gain, uint8_t right_gain)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+  Error_Handler_Ex(__FILE__, __LINE__, 999);
   /* USER CODE END Error_Handler_Debug */
 }
 

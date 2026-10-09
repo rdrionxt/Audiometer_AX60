@@ -166,15 +166,7 @@ USBD_StorageTypeDef USBD_Storage_Interface_fops_FS =
 int8_t STORAGE_Init_FS(uint8_t lun)
 {
   /* USER CODE BEGIN 2 */
-  UNUSED(lun);
-
-  if (!sd_initialized)
-  {
-    if (SD_Init() != SD_OK)
-    {
-      return (USBD_FAIL);
-    }
-  }
+ UNUSED(lun);
 
   return (USBD_OK);
   /* USER CODE END 2 */
@@ -195,7 +187,7 @@ int8_t STORAGE_GetCapacity_FS(uint8_t lun, uint32_t *block_num, uint16_t *block_
   uint32_t blocks = SD_GetBlocks();
   if (blocks > 0)
   {
-      *block_num = blocks;
+      *block_num = blocks - 1;
   }
   else
   {
@@ -216,12 +208,7 @@ int8_t STORAGE_IsReady_FS(uint8_t lun)
   /* USER CODE BEGIN 4 */
   UNUSED(lun);
 
-  if (!sd_initialized || SD_IsMscBusy())
-  {
-    return (USBD_FAIL);
-  }
-
-  return (USBD_OK);
+  return (sd_initialized) ? USBD_OK : USBD_FAIL;
   /* USER CODE END 4 */
 }
 
@@ -251,10 +238,6 @@ int8_t STORAGE_Read_FS(uint8_t lun, uint8_t *buf, uint32_t blk_addr, uint16_t bl
 {
   /* USER CODE BEGIN 6 */
   UNUSED(lun);
-  if (SD_IsMscBusy())
-  {
-    return (USBD_FAIL);
-  }
   if (SD_ReadBlock(buf, blk_addr, blk_len) == SD_OK)
   {
       return (USBD_OK);
@@ -275,10 +258,6 @@ int8_t STORAGE_Write_FS(uint8_t lun, uint8_t *buf, uint32_t blk_addr, uint16_t b
 {
   /* USER CODE BEGIN 7 */
   UNUSED(lun);
-  if (SD_IsMscBusy())
-  {
-    return (USBD_FAIL);
-  }
   if (SD_WriteBlock(buf, blk_addr, blk_len) == SD_OK)
   {
       return (USBD_OK);

@@ -20,7 +20,7 @@ The device routes signals to distinct acoustic transducers with specific electri
 | :--- | :--- | :--- | :--- |
 | **Air Conduction (AC) Left** | 10 $\Omega$ / 300 $\Omega$ (Telephonics TDH-39 / DD45) | `AC_Left_EN` (PE13) | Low THD, high power drive, click-free switching |
 | **Air Conduction (AC) Right** | 10 $\Omega$ / 300 $\Omega$ | `AC_Right_EN` (PE14) | Match left channel frequency response within $\pm 0.5\text{ dB}$ |
-| **Bone Conduction (BC)** | 10 $\Omega$ (Radioear B71 / B81) | `BC_EN` (PE7), `BC_L_R_EN` (PE10) | High mechanical power required at low frequencies (250Hz) |
+| **Bone Conduction (BC)** | 10 $\Omega$ (Radioear B71 / B81) | `BC_EN` (PE7) | High mechanical power required at low frequencies (250Hz) |
 | **Insert Earphones** | 50 $\Omega$ / 300 $\Omega$ (Etymotic ER-3A/5A) | `INSERT_EP_EN` (PE12) | High acoustic isolation, electrostatic discharge (ESD) protection |
 | **Free Field (FF)** | Line level into external power amp | `FF_EN` (PE9) | Low-impedance balanced or single-ended line out |
 | **White Noise / Masking** | Narrowband / Speech noise | `WN_EN` (PE8) | Crest factor management to avoid clipping |

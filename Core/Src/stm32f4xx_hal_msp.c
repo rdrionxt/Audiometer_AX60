@@ -185,9 +185,33 @@ void HAL_I2S_MspInit(I2S_HandleTypeDef* hi2s)
     GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-    /* I2S1 / SPI1 Interrupt Init (High priority 4 for continuous glitch-free audio) */
+    /* I2S1 / SPI1 Interrupt Init */
     HAL_NVIC_SetPriority(SPI1_IRQn, 4, 0);
     HAL_NVIC_EnableIRQ(SPI1_IRQn);
+
+    /* I2S1 DMA Init (DMA2 Stream 3 Channel 3 for continuous glitch-free stereo streaming) */
+    extern DMA_HandleTypeDef hdma_spi1_tx;
+    __HAL_RCC_DMA2_CLK_ENABLE();
+    hdma_spi1_tx.Instance = DMA2_Stream3;
+    hdma_spi1_tx.Init.Channel = DMA_CHANNEL_3;
+    hdma_spi1_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_spi1_tx.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_spi1_tx.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_spi1_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
+    hdma_spi1_tx.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
+    hdma_spi1_tx.Init.Mode = DMA_CIRCULAR;
+    hdma_spi1_tx.Init.Priority = DMA_PRIORITY_HIGH;
+    hdma_spi1_tx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+    if (HAL_DMA_Init(&hdma_spi1_tx) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_LINKDMA(hi2s, hdmatx, hdma_spi1_tx);
+
+    /* DMA2 Stream 3 Interrupt Init */
+    HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 3, 0);
+    HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
   }
 }
 
@@ -203,6 +227,9 @@ void HAL_I2S_MspDeInit(I2S_HandleTypeDef* hi2s)
     /* Disable SPI1 Interrupt */
     HAL_NVIC_DisableIRQ(SPI1_IRQn);
 
+    /* De-Initialize DMA */
+    HAL_DMA_DeInit(hi2s->hdmatx);
+
     __HAL_RCC_SPI1_CLK_DISABLE();
     HAL_GPIO_DeInit(GPIOA, GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_7);
   }
@@ -210,7 +237,7 @@ void HAL_I2S_MspDeInit(I2S_HandleTypeDef* hi2s)
 
 /**
 * @brief UART MSP Initialization
-* Configures USART2 on PA2 (TX) and PA3 (RX) for CH340G USB Serial WebUI control.
+* Configures USART2 on PA2 (TX) and PA3 (RX) for Display / HMI interface.
 * @param huart: UART handle pointer
 * @retval None
 */

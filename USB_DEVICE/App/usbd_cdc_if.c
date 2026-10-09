@@ -35,9 +35,7 @@ uint8_t *CDC_GetRxBuffer(void)
 
 int8_t CDC_Init_FS(void)
 {
-    USBD_CDC_SetTxBuffer(&hUsbDeviceFS, tx_buf, 0);
-    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, rx_packet);
-    CDC_UnstickTx();
+    composite.cdc.TxState = 0U;
     return 0;
 }
 
@@ -87,8 +85,6 @@ int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len)
         {
             WebUI_UartRxByte(Buf[i]);
         }
-        USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
-        USBD_CDC_ReceivePacket(&hUsbDeviceFS);
     }
     return 0;
 }

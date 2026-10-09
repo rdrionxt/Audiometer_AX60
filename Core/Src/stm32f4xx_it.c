@@ -205,18 +205,18 @@ extern UART_HandleTypeDef huart3;
 extern void WebUI_UartRxByte(uint8_t byte);
 
 /**
-  * @brief This function handles USART2 global interrupt for WebUI serial protocol.
+  * @brief This function handles USART2 global interrupt (Dedicated Display Interface).
   */
 void USART2_IRQHandler(void)
 {
   uint32_t sr = huart2.Instance->SR;
   if (sr & (USART_SR_RXNE | USART_SR_ORE))
   {
-    uint8_t ch = (uint8_t)(huart2.Instance->DR & 0xFF);
-    if (sr & USART_SR_RXNE)
-    {
-      WebUI_UartRxByte(ch);
-    }
+    /* Read DR to clear RXNE and ORE flags.
+     * Note: Display frames (Proculus DGUS / UnicView AD) belong to dedicated display parser,
+     * not WebUI protocol. Do not inject into WebUI buffer. */
+    volatile uint8_t dummy = (uint8_t)(huart2.Instance->DR & 0xFF);
+    (void)dummy;
   }
 }
 
@@ -236,14 +236,23 @@ void USART3_IRQHandler(void)
   }
 }
 
-extern void Audio_I2S_ISR_Handler(void);
+extern I2S_HandleTypeDef hi2s1;
+extern DMA_HandleTypeDef hdma_spi1_tx;
 
 /**
-  * @brief This function handles SPI1 / I2S1 global interrupt for continuous real-time audio DAC streaming.
+  * @brief This function handles SPI1 / I2S1 global interrupt.
   */
 void SPI1_IRQHandler(void)
 {
-  Audio_I2S_ISR_Handler();
+  HAL_I2S_IRQHandler(&hi2s1);
+}
+
+/**
+  * @brief This function handles DMA2 Stream 3 global interrupt for continuous I2S1 TX streaming.
+  */
+void DMA2_Stream3_IRQHandler(void)
+{
+  HAL_DMA_IRQHandler(&hdma_spi1_tx);
 }
 
 extern PCD_HandleTypeDef hpcd_USB_OTG_FS;

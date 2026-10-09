@@ -139,6 +139,24 @@
       border: 1px solid rgba(34, 197, 94, 0.4);
     }
 
+    .status-pill.charging {
+      background: rgba(56, 189, 248, 0.2);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.4);
+    }
+
+    .status-pill.warning {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    .status-pill.critical {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
     .status-dot {
       width: 8px;
       height: 8px;
@@ -571,6 +589,13 @@
       box-shadow: 0 1px 4px rgba(2, 132, 199, 0.4);
     }
 
+    .btn-subtoggle.spk {
+      background: #059669;
+      color: #ffffff;
+      border-color: #047857;
+      box-shadow: 0 1px 4px rgba(5, 150, 105, 0.4);
+    }
+
     /* Bottom Section: Encoders & Stimulus & Freq */
     .console-bottom-row {
       display: grid;
@@ -704,46 +729,201 @@
       gap: 16px;
     }
 
-    /* Green Stimulus Push Button */
-    .stimulus-wrapper {
+    /* Tactile 3D Push-Pull Stimulus Button Component */
+    .stimulus-wrapper.push-pull-wrapper {
       display: flex;
       flex-direction: column;
       align-items: center;
+      gap: 8px;
+      background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+      padding: 10px 14px;
+      border-radius: 14px;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08), inset 0 1px 0 #ffffff;
+      min-width: 116px;
+      transition: all 0.2s ease;
+    }
+
+    .stimulus-wrapper.push-pull-wrapper.pushed {
+      background: linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%);
+      border-color: #86efac;
+      box-shadow: 0 0 14px rgba(34, 197, 94, 0.3), inset 0 1px 0 #ffffff;
+    }
+
+    .push-pull-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
       gap: 6px;
     }
 
-    .btn-stimulus {
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
-      background: radial-gradient(circle at 35% 30%, #4ade80 0%, #16a34a 60%, #15803d 100%);
-      border: 2px solid #14532d;
-      box-shadow: 0 6px 12px rgba(22, 163, 74, 0.4), inset 0 2px 3px rgba(255, 255, 255, 0.7);
-      color: #ffffff;
-      font-size: 1.1rem;
+    .push-pull-header .stimulus-label {
+      font-size: 0.82rem;
       font-weight: 800;
+      color: #1e293b;
+      letter-spacing: -0.2px;
+      white-space: nowrap;
+    }
+
+    .push-pull-badge {
+      font-size: 0.65rem;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      background: #e2e8f0;
+      color: #64748b;
+      border: 1px solid #cbd5e1;
+      letter-spacing: 0.5px;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .push-pull-badge.pushed {
+      background: #22c55e;
+      color: #ffffff;
+      border-color: #16a34a;
+      box-shadow: 0 0 8px rgba(34, 197, 94, 0.6);
+      animation: badgePulse 1s infinite alternate;
+    }
+
+    @keyframes badgePulse {
+      from { opacity: 0.85; transform: scale(0.97); }
+      to { opacity: 1; transform: scale(1.03); }
+    }
+
+    /* 3D Machined Collar / Mounting Bezel */
+    .push-pull-housing {
+      position: relative;
+      width: 74px;
+      height: 74px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 40% 35%, #94a3b8 0%, #475569 50%, #1e293b 100%);
+      border: 2px solid #334155;
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.25), inset 0 2px 3px rgba(255, 255, 255, 0.4), inset 0 -3px 6px rgba(0, 0, 0, 0.5);
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      transition: all 0.08s ease;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .push-pull-shaft-ring {
+      position: absolute;
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      border: 2px dashed rgba(255, 255, 255, 0.25);
+      pointer-events: none;
+      transition: all 0.2s ease;
+    }
+
+    /* The Plunger / Actuator Button */
+    .btn-push-pull {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      z-index: 2;
+      transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease, background 0.18s ease;
+      cursor: pointer;
       touch-action: manipulation;
     }
 
-    .btn-stimulus:hover {
-      filter: brightness(1.1);
+    /* PULLED Position (Default / Extended Outward) */
+    .btn-push-pull.pulled {
+      background: radial-gradient(circle at 35% 30%, #4ade80 0%, #16a34a 60%, #15803d 100%);
+      border: 2px solid #14532d;
+      box-shadow: 0 8px 14px rgba(0, 0, 0, 0.38), inset 0 2px 4px rgba(255, 255, 255, 0.8), inset 0 -4px 6px rgba(0, 0, 0, 0.3);
+      transform: translateY(-4px);
+      color: #ffffff;
     }
 
-    .btn-stimulus:active, .btn-stimulus.active {
-      transform: translateY(3px);
-      box-shadow: 0 1px 3px rgba(0,0,0,0.4), inset 0 3px 6px rgba(0, 0, 0, 0.4);
-      background: radial-gradient(circle at 50% 50%, #15803d 0%, #166534 100%);
+    .btn-push-pull.pulled:hover {
+      filter: brightness(1.08);
+      transform: translateY(-5px);
+      box-shadow: 0 10px 18px rgba(0, 0, 0, 0.45), inset 0 3px 5px rgba(255, 255, 255, 0.9);
     }
 
-    .stimulus-label {
-      font-size: 0.95rem;
+    /* PUSHED Position (Engaged / Recessed Inward) */
+    .btn-push-pull.pushed {
+      background: radial-gradient(circle at 50% 50%, #22c55e 0%, #16a34a 65%, #14532d 100%);
+      border: 2px solid #4ade80;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 4px 8px rgba(0, 0, 0, 0.55), 0 0 18px rgba(34, 197, 94, 0.8), 0 0 28px rgba(74, 222, 128, 0.4);
+      transform: translateY(3px) scale(0.96);
+      color: #ffffff;
+      animation: pushGlow 1.2s infinite alternate ease-in-out;
+    }
+
+    @keyframes pushGlow {
+      from {
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 4px 8px rgba(0, 0, 0, 0.55), 0 0 14px rgba(34, 197, 94, 0.7);
+      }
+      to {
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 4px 8px rgba(0, 0, 0, 0.55), 0 0 22px rgba(34, 197, 94, 1), 0 0 32px rgba(74, 222, 128, 0.6);
+      }
+    }
+
+    .push-pull-num {
+      font-size: 1.15rem;
+      font-weight: 800;
+      line-height: 1;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    }
+
+    .push-pull-action-text {
+      font-size: 0.62rem;
+      font-weight: 800;
+      letter-spacing: 0.4px;
+      margin-top: 2px;
+      opacity: 0.95;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .push-pull-control-strip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .push-pull-subbtn {
+      font-size: 0.68rem;
       font-weight: 700;
-      color: var(--text-label);
+      padding: 3px 10px;
+      border-radius: 6px;
+      background: #e2e8f0;
+      border: 1px solid #94a3b8;
+      color: #1e293b;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .push-pull-subbtn:hover {
+      background: #cbd5e1;
+    }
+
+    .push-pull-subbtn.active {
+      background: #16a34a;
+      color: #ffffff;
+      border-color: #14532d;
+      box-shadow: 0 0 8px rgba(22, 163, 74, 0.4);
+    }
+
+    .subbtn-icon {
+      font-size: 0.75rem;
+      line-height: 1;
     }
 
     /* Center Frequency Arrow Buttons */
@@ -919,6 +1099,29 @@
         <span class="status-dot"></span>
         <span id="connStatusText">Offline (Ready)</span>
       </div>
+
+      <div id="rtcStatusPill" class="status-pill" title="DS1302 Hardware Real-Time Clock">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+        <span id="rtcTimeText">RTC: --:--:--</span>
+      </div>
+
+      <div id="batStatusPill" class="status-pill" title="Battery & Power Detection (PA0/PA1)">
+        <svg id="batIconSvg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="1" y="6" width="18" height="12" rx="2" ry="2"></rect>
+          <line x1="23" y1="10" x2="23" y2="14"></line>
+        </svg>
+        <span id="batStatusText">BAT: --%</span>
+      </div>
+
+      <button id="btnSyncRtcTime" class="btn-serial" style="background: #0284c7; padding: 6px 14px; font-size: 0.8rem;" title="Sync DS1302 RTC to computer's current time">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+        </svg>
+        Sync PC Time
+      </button>
     </div>
   </div>
 
@@ -1119,8 +1322,9 @@
 
       <div class="btn-capsule-item">
         <span class="capsule-label">Talk Back</span>
-        <button class="btn-capsule" data-btn-id="24" data-byte="2" data-bit="5" id="btnTalkBack" title="Toggle Talkback (Monitor Headphone)">24</button>
-        <span class="capsule-num">24 (MH)</span>
+        <button class="btn-capsule" data-btn-id="24" data-byte="2" data-bit="5" id="btnTalkBack" title="Toggle Talkback">24</button>
+        <span class="capsule-num">24</span>
+        <button class="btn-subtoggle" id="btnTalkBackDest" title="Click to switch Talkback Destination (Monitor Headphone / Internal Speaker)">MH</button>
       </div>
 
       <div class="btn-capsule-item">
@@ -1165,12 +1369,26 @@
         <div class="encoder-title">Puretone Intensity Encoder (3)</div>
       </div>
 
-      <!-- Center Controls: 5 Stimulus | 1 & 2 Frequency | 6 Stimulus -->
+      <!-- Center Controls: 5 Stimulus Push-Pull | 1 & 2 Frequency | 6 Stimulus Push-Pull -->
       <div class="bottom-center-cluster">
-        <!-- 5 Stimulus (Left / Puretone) -->
-        <div class="stimulus-wrapper">
-          <div class="btn-stimulus" data-btn-id="5" data-byte="0" data-bit="2">5</div>
-          <span class="stimulus-label">Stimulus</span>
+        <!-- 5 Stimulus Push-Pull Button (CH1 Puretone) -->
+        <div class="stimulus-wrapper push-pull-wrapper" id="stimulus5Wrapper">
+          <div class="push-pull-header">
+            <span class="stimulus-label">Stimulus (CH1)</span>
+            <span class="push-pull-badge" id="stim5Badge">PULLED</span>
+          </div>
+          <div class="push-pull-housing" id="stim5Housing" title="Push-Pull Stimulus Button: Click or drag down to PUSH (Engage Tone) / Click or drag up to PULL (Disengage Tone). Hotkey: Spacebar">
+            <div class="push-pull-shaft-ring"></div>
+            <div class="btn-push-pull pulled" id="btnStimulus5" data-btn-id="5" data-byte="0" data-bit="2">
+              <span class="push-pull-num">5</span>
+              <span class="push-pull-action-text" id="stim5ActionText">PUSH &#9660;</span>
+            </div>
+          </div>
+          <div class="push-pull-control-strip">
+            <button class="push-pull-subbtn" id="btnStim5Toggle" title="Toggle Stimulus 5 (Push / Pull)">
+              <span class="subbtn-icon">&#8645;</span> PUSH / PULL
+            </button>
+          </div>
         </div>
 
         <!-- 1 & 2 Frequency Arrows -->
@@ -1190,10 +1408,24 @@
           <span class="freq-label">Frequency</span>
         </div>
 
-        <!-- 6 Stimulus (Right / Masking) -->
-        <div class="stimulus-wrapper">
-          <div class="btn-stimulus" data-btn-id="6" data-byte="0" data-bit="3">6</div>
-          <span class="stimulus-label">Stimulus</span>
+        <!-- 6 Stimulus Push-Pull Button (CH2 Masking) -->
+        <div class="stimulus-wrapper push-pull-wrapper" id="stimulus6Wrapper">
+          <div class="push-pull-header">
+            <span class="stimulus-label">Stimulus (CH2)</span>
+            <span class="push-pull-badge" id="stim6Badge">PULLED</span>
+          </div>
+          <div class="push-pull-housing" id="stim6Housing" title="Push-Pull Stimulus Button: Click or drag down to PUSH (Engage Masking) / Click or drag up to PULL (Disengage Masking). Hotkey: M">
+            <div class="push-pull-shaft-ring"></div>
+            <div class="btn-push-pull pulled" id="btnStimulus6" data-btn-id="6" data-byte="0" data-bit="3">
+              <span class="push-pull-num">6</span>
+              <span class="push-pull-action-text" id="stim6ActionText">PUSH &#9660;</span>
+            </div>
+          </div>
+          <div class="push-pull-control-strip">
+            <button class="push-pull-subbtn" id="btnStim6Toggle" title="Toggle Stimulus 6 (Push / Pull)">
+              <span class="subbtn-icon">&#8645;</span> PUSH / PULL
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1360,6 +1592,7 @@
     let talkOverActive = false;
     let talkOverExtMic = false; /* false = Internal Mic (0), true = External Mic (1) */
     let talkBackActive = false;
+    let talkBackDestSpk = false; /* false = Monitor Headphone (0), true = Internal Speaker (1) */
     let auxActive = false;
 
     /* Generate radial tick marks for encoders */
@@ -1493,83 +1726,223 @@
      * ========================================================================= */
     const allButtons = document.querySelectorAll('[data-btn-id]');
 
-    // Stimulus Presentation Timers & State
+    // Stimulus Presentation State & Timers (Push-Pull Mechanism)
+    let stim5Pushed = false;
+    let stim6Pushed = false;
     let stim5Timer = null;
     let stim6Timer = null;
+    let stim5SafetyTimer = null;
+    let stim6SafetyTimer = null;
+    const SAFETY_AUTO_DISARM_SEC = 30; // 30 seconds max continuous tone exposure safety threshold
 
-    function activateStimulus5(pressed) {
+    function setStimulus5(pushed, reason = 'User') {
+      stim5Pushed = pushed;
       if (stim5Timer) {
         clearTimeout(stim5Timer);
         stim5Timer = null;
       }
+      if (stim5SafetyTimer) {
+        clearTimeout(stim5SafetyTimer);
+        stim5SafetyTimer = null;
+      }
 
-      const btn = document.querySelector('[data-btn-id="5"]');
+      const btn = document.getElementById('btnStimulus5') || document.querySelector('[data-btn-id="5"]');
+      const wrapper = document.getElementById('stimulus5Wrapper');
+      const badge = document.getElementById('stim5Badge');
+      const actionText = document.getElementById('stim5ActionText');
+      const subBtn = document.getElementById('btnStim5Toggle');
       const stimStatus = document.getElementById('lcdStimStatus');
 
-      if (pressed) {
+      if (pushed) {
         btnBitmask[0] |= (1 << 2);
-        if (btn) btn.classList.add('active');
+        if (btn) {
+          btn.classList.add('pushed', 'active');
+          btn.classList.remove('pulled');
+        }
+        if (wrapper) wrapper.classList.add('pushed');
+        if (badge) {
+          badge.textContent = 'PUSHED';
+          badge.classList.add('pushed');
+        }
+        if (actionText) actionText.innerHTML = 'PULL &#9650;';
+        if (subBtn) {
+          subBtn.classList.add('active');
+          subBtn.innerHTML = '<span class="subbtn-icon">&#9650;</span> PULL (STOP)';
+        }
         if (stimStatus) {
-          stimStatus.textContent = 'STIMULUS: ACTIVE (PURETONE)';
+          stimStatus.textContent = 'STIMULUS: ACTIVE (PUSHED)';
           stimStatus.style.color = '#4ade80';
         }
-        transmitState('Button 5 (Puretone Stim) ACTIVE');
+        transmitState(`Stimulus 5 (Puretone) PUSHED (ACTIVE) [${reason}]`);
+
+        // Safety auto-disarm timer to protect patient hearing
+        stim5SafetyTimer = setTimeout(() => {
+          if (stim5Pushed) {
+            logEvent("[SAFETY]", "Stimulus 5 auto-disarmed after 30s timeout.");
+            setStimulus5(false, 'Auto Safety Timeout');
+          }
+        }, SAFETY_AUTO_DISARM_SEC * 1000);
+
       } else {
         btnBitmask[0] &= ~(1 << 2);
-        if (btn) btn.classList.remove('active');
+        if (btn) {
+          btn.classList.remove('pushed', 'active');
+          btn.classList.add('pulled');
+        }
+        if (wrapper) wrapper.classList.remove('pushed');
+        if (badge) {
+          badge.textContent = 'PULLED';
+          badge.classList.remove('pushed');
+        }
+        if (actionText) actionText.innerHTML = 'PUSH &#9660;';
+        if (subBtn) {
+          subBtn.classList.remove('active');
+          subBtn.innerHTML = '<span class="subbtn-icon">&#8645;</span> PUSH / PULL';
+        }
         if (stimStatus) {
           if (contActive) {
             stimStatus.textContent = 'STIMULUS: CONTINUOUS (ACTIVE)';
             stimStatus.style.color = '#c084fc';
           } else {
-            stimStatus.textContent = 'STIMULUS: IDLE';
+            stimStatus.textContent = 'STIMULUS: IDLE (PULLED)';
             stimStatus.style.color = '#93c5fd';
           }
         }
-        transmitState('Button 5 (Puretone Stim) RELEASE');
-        // Redundant release frame 50ms later guarantees MCU never misses the release frame
+        transmitState(`Stimulus 5 (Puretone) PULLED (OFF) [${reason}]`);
         stim5Timer = setTimeout(() => {
-          transmitState('Button 5 (Puretone Stim) RELEASE CONFIRM');
+          transmitState('Stimulus 5 (Puretone) RELEASE CONFIRM');
           stim5Timer = null;
         }, 50);
       }
     }
 
-    function activateStimulus6(pressed) {
+    function toggleStimulus5(reason = 'Click') {
+      setStimulus5(!stim5Pushed, reason);
+    }
+
+    function setStimulus6(pushed, reason = 'User') {
+      stim6Pushed = pushed;
       if (stim6Timer) {
         clearTimeout(stim6Timer);
         stim6Timer = null;
       }
+      if (stim6SafetyTimer) {
+        clearTimeout(stim6SafetyTimer);
+        stim6SafetyTimer = null;
+      }
 
-      const btn = document.querySelector('[data-btn-id="6"]');
+      const btn = document.getElementById('btnStimulus6') || document.querySelector('[data-btn-id="6"]');
+      const wrapper = document.getElementById('stimulus6Wrapper');
+      const badge = document.getElementById('stim6Badge');
+      const actionText = document.getElementById('stim6ActionText');
+      const subBtn = document.getElementById('btnStim6Toggle');
       const stimStatus = document.getElementById('lcdStimStatus');
 
-      if (pressed) {
+      if (pushed) {
         btnBitmask[0] |= (1 << 3);
-        if (btn) btn.classList.add('active');
+        if (btn) {
+          btn.classList.add('pushed', 'active');
+          btn.classList.remove('pulled');
+        }
+        if (wrapper) wrapper.classList.add('pushed');
+        if (badge) {
+          badge.textContent = 'PUSHED';
+          badge.classList.add('pushed');
+        }
+        if (actionText) actionText.innerHTML = 'PULL &#9650;';
+        if (subBtn) {
+          subBtn.classList.add('active');
+          subBtn.innerHTML = '<span class="subbtn-icon">&#9650;</span> PULL (STOP)';
+        }
         if (stimStatus) {
           stimStatus.textContent = 'STIMULUS: ACTIVE (MASKING)';
           stimStatus.style.color = '#4ade80';
         }
-        transmitState('Button 6 (Masking Stim) ACTIVE');
+        transmitState(`Stimulus 6 (Masking) PUSHED (ACTIVE) [${reason}]`);
+
+        stim6SafetyTimer = setTimeout(() => {
+          if (stim6Pushed) {
+            logEvent("[SAFETY]", "Stimulus 6 auto-disarmed after 30s timeout.");
+            setStimulus6(false, 'Auto Safety Timeout');
+          }
+        }, SAFETY_AUTO_DISARM_SEC * 1000);
+
       } else {
         btnBitmask[0] &= ~(1 << 3);
-        if (btn) btn.classList.remove('active');
+        if (btn) {
+          btn.classList.remove('pushed', 'active');
+          btn.classList.add('pulled');
+        }
+        if (wrapper) wrapper.classList.remove('pushed');
+        if (badge) {
+          badge.textContent = 'PULLED';
+          badge.classList.remove('pushed');
+        }
+        if (actionText) actionText.innerHTML = 'PUSH &#9660;';
+        if (subBtn) {
+          subBtn.classList.remove('active');
+          subBtn.innerHTML = '<span class="subbtn-icon">&#8645;</span> PUSH / PULL';
+        }
         if (stimStatus) {
           if (contActive) {
             stimStatus.textContent = 'STIMULUS: CONTINUOUS (ACTIVE)';
             stimStatus.style.color = '#c084fc';
           } else {
-            stimStatus.textContent = 'STIMULUS: IDLE';
+            stimStatus.textContent = 'STIMULUS: IDLE (PULLED)';
             stimStatus.style.color = '#93c5fd';
           }
         }
-        transmitState('Button 6 (Masking Stim) RELEASE');
+        transmitState(`Stimulus 6 (Masking) PULLED (OFF) [${reason}]`);
         stim6Timer = setTimeout(() => {
-          transmitState('Button 6 (Masking Stim) RELEASE CONFIRM');
+          transmitState('Stimulus 6 (Masking) RELEASE CONFIRM');
           stim6Timer = null;
         }, 50);
       }
+    }
+
+    function toggleStimulus6(reason = 'Click') {
+      setStimulus6(!stim6Pushed, reason);
+    }
+
+    // Helper for drag/gesture or click on Push-Pull Housing
+    function setupPushPullGesture(housingEl, getPushed, setPushed) {
+      if (!housingEl) return;
+      let startY = 0;
+      let isPointerDown = false;
+      let dragged = false;
+
+      housingEl.addEventListener('pointerdown', (e) => {
+        isPointerDown = true;
+        dragged = false;
+        startY = e.clientY;
+        housingEl.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+
+      housingEl.addEventListener('pointermove', (e) => {
+        if (!isPointerDown) return;
+        const dy = e.clientY - startY;
+        if (Math.abs(dy) > 10) {
+          dragged = true;
+          if (dy > 10 && !getPushed()) {
+            setPushed(true, 'Drag Down (Push)');
+          } else if (dy < -10 && getPushed()) {
+            setPushed(false, 'Drag Up (Pull)');
+          }
+        }
+      });
+
+      const onEnd = (e) => {
+        if (!isPointerDown) return;
+        isPointerDown = false;
+        try { housingEl.releasePointerCapture(e.pointerId); } catch (_) {}
+        if (!dragged) {
+          setPushed(!getPushed(), 'Click/Tap');
+        }
+      };
+
+      housingEl.addEventListener('pointerup', onEnd);
+      housingEl.addEventListener('pointercancel', onEnd);
     }
 
     function toggleContinuousMode() {
@@ -1663,13 +2036,34 @@
       if (talkBackActive) {
         btnBitmask[2] |= (1 << 5);
         if (btn) btn.classList.add('active');
-        if (badge) badge.style.display = 'inline-block';
+        if (badge) {
+          badge.style.display = 'inline-block';
+          badge.textContent = talkBackDestSpk ? 'TALKBACK (INT SPK)' : 'TALKBACK (MH)';
+        }
       } else {
         btnBitmask[2] &= ~(1 << 5);
         if (btn) btn.classList.remove('active');
         if (badge) badge.style.display = 'none';
       }
-      transmitState(`Talk Back ${talkBackActive ? 'ON' : 'OFF'} (Monitor Headphone ${talkBackActive ? 'ACTIVE' : 'OFF'})`);
+      transmitState(`Talk Back ${talkBackActive ? 'ON' : 'OFF'} (${talkBackDestSpk ? 'Internal Speaker' : 'Monitor Headphone'})`);
+    }
+
+    function toggleTalkBackDest() {
+      talkBackDestSpk = !talkBackDestSpk;
+      const btnDest = document.getElementById('btnTalkBackDest');
+      const badge = document.getElementById('lcdTalkBackBadge');
+      if (btnDest) {
+        btnDest.textContent = talkBackDestSpk ? 'INT SPK' : 'MH';
+        if (talkBackDestSpk) {
+          btnDest.classList.add('spk');
+        } else {
+          btnDest.classList.remove('spk');
+        }
+      }
+      if (talkBackActive && badge) {
+        badge.textContent = talkBackDestSpk ? 'TALKBACK (INT SPK)' : 'TALKBACK (MH)';
+      }
+      transmitState(`Talkback Destination set to ${talkBackDestSpk ? 'Internal Speaker' : 'Monitor Headphone'}`);
     }
 
     function toggleAux() {
@@ -1678,12 +2072,15 @@
       const badge = document.getElementById('lcdAuxBadge');
       if (auxActive) {
         if (btn) btn.classList.add('active');
-        if (badge) badge.style.display = 'inline-block';
+        if (badge) {
+          badge.textContent = 'AUX IN (AC ONLY)';
+          badge.style.display = 'inline-block';
+        }
       } else {
         if (btn) btn.classList.remove('active');
         if (badge) badge.style.display = 'none';
       }
-      transmitState(`AUX Input ${auxActive ? 'ON' : 'OFF'}`);
+      transmitState(`AUX Input ${auxActive ? 'ON (AC Only)' : 'OFF'}`);
     }
 
     allButtons.forEach(btn => {
@@ -1692,29 +2089,11 @@
       const bitIdx = parseInt(btn.dataset.bit, 10);
 
       if (btnId === 5) {
-        btn.addEventListener('pointerdown', (e) => {
-          btn.setPointerCapture(e.pointerId);
-          activateStimulus5(true);
-          e.preventDefault();
-        });
-        const onEnd5 = (e) => {
-          activateStimulus5(false);
-          try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
-        };
-        btn.addEventListener('pointerup', onEnd5);
-        btn.addEventListener('pointercancel', onEnd5);
+        // Handled via Push-Pull mechanism (setup below)
+        return;
       } else if (btnId === 6) {
-        btn.addEventListener('pointerdown', (e) => {
-          btn.setPointerCapture(e.pointerId);
-          activateStimulus6(true);
-          e.preventDefault();
-        });
-        const onEnd6 = (e) => {
-          activateStimulus6(false);
-          try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
-        };
-        btn.addEventListener('pointerup', onEnd6);
-        btn.addEventListener('pointercancel', onEnd6);
+        // Handled via Push-Pull mechanism (setup below)
+        return;
       } else if (btnId === 13) {
         btn.addEventListener('click', (e) => {
           e.preventDefault();
@@ -1828,6 +2207,15 @@
       });
     }
 
+    // Sub-toggle button for Talkback Destination (MH / Internal Speaker)
+    const btnTalkBackDestEl = document.getElementById('btnTalkBackDest');
+    if (btnTalkBackDestEl) {
+      btnTalkBackDestEl.addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleTalkBackDest();
+      });
+    }
+
     // AUX Input Button
     const btnAuxEl = document.getElementById('btnAux');
     if (btnAuxEl) {
@@ -1846,7 +2234,8 @@
                          ((ch1Transducer & 0x03) << 1) |
                          ((ch2NoiseMode & 0x01) << 3) |
                          ((talkOverExtMic ? 1 : 0) << 4) |
-                         ((auxActive ? 1 : 0) << 5);
+                         ((auxActive ? 1 : 0) << 5) |
+                         ((talkBackDestSpk ? 1 : 0) << 6);
 
       const packet = new Uint8Array(11);
       packet[0] = 0xAA;                                     // Header
@@ -1868,41 +2257,44 @@
     }
 
     let isSerialWriting = false;
-    let queuedPacket = null;
-    let queuedReason = '';
+    const txQueue = [];
 
     async function transmitState(reason) {
       const packet = buildPacket();
-      queuedPacket = packet;
-      queuedReason = reason;
+      txQueue.push({ packet, reason });
 
       if (isSerialWriting) {
-        return; // Will be sent sequentially as soon as active write completes
+        return; // Next packet will be processed sequentially by the active queue loop
       }
 
       isSerialWriting = true;
-      while (queuedPacket) {
-        const toSend = queuedPacket;
-        const toReason = queuedReason;
-        queuedPacket = null;
+      try {
+        while (txQueue.length > 0) {
+          const item = txQueue.shift();
+          const toSend = item.packet;
+          const toReason = item.reason;
 
-        const hexStr = hexString(toSend);
-        document.getElementById('lastTxHexDisplay').textContent = hexStr;
-        packetCounter++;
-        document.getElementById('lcdPacketCounter').textContent = `TX FRAMES: ${packetCounter}`;
+          const hexStr = hexString(toSend);
+          const lastTxDisplay = document.getElementById('lastTxHexDisplay');
+          if (lastTxDisplay) lastTxDisplay.textContent = hexStr;
+          packetCounter++;
+          const counterEl = document.getElementById('lcdPacketCounter');
+          if (counterEl) counterEl.textContent = `TX FRAMES: ${packetCounter}`;
 
-        if (serialWriter) {
-          try {
-            await serialWriter.write(toSend);
-          } catch (err) {
-            console.error("UART Write Error:", err);
-            logEvent("TX ERROR", err.message || "Failed to write UART");
-            break;
+          if (serialWriter) {
+            try {
+              await serialWriter.write(toSend);
+            } catch (err) {
+              console.error("UART Write Error:", err);
+              logEvent("TX ERROR", err.message || "Failed to write UART");
+              break;
+            }
           }
+          logEvent(hexStr, toReason);
         }
-        logEvent(hexStr, toReason);
+      } finally {
+        isSerialWriting = false;
       }
-      isSerialWriting = false;
     }
 
     const transmitStateIfChanged = transmitState;
@@ -1976,6 +2368,85 @@
                   rxBuffer.shift();
                   continue;
                 }
+
+                /* Check for 10-byte RTC frame: 0xAA, 0x54, HH, MM, SS, DD, MM, YY, WDAY, 0x55 */
+                if (rxBuffer[1] === 0x54) {
+                  if (rxBuffer.length < 10) {
+                    break; /* Wait for in-flight bytes */
+                  }
+                  if (rxBuffer[9] === 0x55) {
+                    const hr  = String(rxBuffer[2]).padStart(2, '0');
+                    const mn  = String(rxBuffer[3]).padStart(2, '0');
+                    const sc  = String(rxBuffer[4]).padStart(2, '0');
+                    const dy  = String(rxBuffer[5]).padStart(2, '0');
+                    const mo  = String(rxBuffer[6]).padStart(2, '0');
+                    const yr  = 2000 + rxBuffer[7];
+                    const timeStr = `${hr}:${mn}:${sc}`;
+                    const dateStr = `${dy}/${mo}/${yr}`;
+
+                    const rtcText = document.getElementById('rtcTimeText');
+                    const rtcPill = document.getElementById('rtcStatusPill');
+                    if (rtcText) rtcText.textContent = `RTC: ${timeStr}`;
+                    if (rtcPill) {
+                      rtcPill.classList.add('online');
+                      rtcPill.title = `DS1302 Hardware RTC: ${timeStr}  ${dateStr}`;
+                    }
+                    rxBuffer.splice(0, 10);
+                    continue;
+                  }
+                }
+
+                /* Check for 9-byte Battery & Power Detection frame: 0xAA, 0x56, DC, Percent, Bars, Mv_H, Mv_L, Scenario, 0x55 */
+                if (rxBuffer[1] === 0x56) {
+                  if (rxBuffer.length < 9) {
+                    break; /* Wait for full frame */
+                  }
+                  if (rxBuffer[8] === 0x55) {
+                    const dcPlugged = rxBuffer[2];
+                    const batPct    = rxBuffer[3];
+                    const batBars   = rxBuffer[4];
+                    const packMv    = (rxBuffer[5] << 8) | rxBuffer[6];
+                    const scenario  = rxBuffer[7];
+
+                    const batText = document.getElementById('batStatusText');
+                    const batPill = document.getElementById('batStatusPill');
+
+                    const SCENARIOS = [
+                      'ADC Read Timeout',
+                      'No Pack Installed',
+                      'DC Only (No Battery)',
+                      'Charging',
+                      'Critical Battery (<5%)',
+                      'Low Battery Warning (<10%)',
+                      'Fully Charged',
+                      'Discharging (Battery)'
+                    ];
+                    const scenName = SCENARIOS[scenario] || 'Normal';
+                    const voltsStr = (packMv / 1000).toFixed(2);
+
+                    if (batPill && batText) {
+                      batPill.className = 'status-pill';
+                      if (dcPlugged) {
+                        batPill.classList.add('charging');
+                        batText.textContent = `⚡ DC: ${batPct}%`;
+                        batPill.title = `Power: External DC Supply Plugged (${scenName}) | Pack: ${voltsStr}V (${batPct}%, ${batBars} bars)`;
+                      } else {
+                        if (batPct <= 10) {
+                          batPill.classList.add('critical');
+                        } else if (batPct <= 25) {
+                          batPill.classList.add('warning');
+                        } else {
+                          batPill.classList.add('online');
+                        }
+                        batText.textContent = `BAT: ${batPct}%`;
+                        batPill.title = `Power: Battery (${scenName}) | Pack: ${voltsStr}V (${batPct}%, ${batBars} bars)`;
+                      }
+                    }
+                    rxBuffer.splice(0, 9);
+                    continue;
+                  }
+                }
+
                 if (rxBuffer[3] === 0x55) {
                   const type = rxBuffer[1];
                   const data = rxBuffer[2];
@@ -1988,6 +2459,11 @@
                       ackEl.textContent = 'ACK: OK';
                       ackEl.style.color = '#4ade80';
                     }
+                  } else if (type === 0x53) {
+                    /* RTC Time Sync ACK */
+                    const success = (data === 0x01);
+                    const hexStr = `AA 53 ${data.toString(16).padStart(2, '0').toUpperCase()} 55`;
+                    logRxEvent(hexStr, success ? 'RTC Time Successfully Synchronized!' : 'RTC Time Sync Failed');
                   } else if (type === 0x50) {
                     /* Patient Response Switch Event */
                     const pressed = (data === 0x01);
@@ -2087,6 +2563,7 @@
       }
 
       isConnected = false;
+      txQueue.length = 0;
       btnConnect.classList.remove('connected');
       btnConnect.innerHTML = `
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2182,7 +2659,78 @@
       });
     }
 
+    // Sync PC Time to DS1302 Hardware RTC
+    const btnSyncRtcTime = document.getElementById('btnSyncRtcTime');
+    if (btnSyncRtcTime) {
+      btnSyncRtcTime.addEventListener('click', async () => {
+        if (!isConnected || !serialWriter) {
+          alert("Please connect to the serial port first (click 'Connect Serial').");
+          return;
+        }
+        const now = new Date();
+        const hr   = now.getHours();
+        const min  = now.getMinutes();
+        const sec  = now.getSeconds();
+        const day  = now.getDate();
+        const mon  = now.getMonth() + 1;
+        const yr   = now.getFullYear() % 100;
+        const wday = (now.getDay() === 0) ? 7 : now.getDay(); /* 1=Mon .. 7=Sun */
+
+        const frame = new Uint8Array([0xAA, 0x53, hr, min, sec, day, mon, yr, wday, 0x55]);
+        try {
+          await serialWriter.write(frame);
+          const hexStr = Array.from(frame).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+          logEvent("[RTC]", `Synchronizing RTC to PC Time: ${now.toLocaleTimeString()} (${now.toLocaleDateString()}) [${hexStr}]`);
+        } catch (err) {
+          console.error("Failed to send RTC sync frame:", err);
+        }
+      });
+    }
+
+    // Initialize Push-Pull Stimulus Button Controls (Gesture, Sub-button, Hotkeys)
+    setupPushPullGesture(document.getElementById('stim5Housing'), () => stim5Pushed, setStimulus5);
+    setupPushPullGesture(document.getElementById('stim6Housing'), () => stim6Pushed, setStimulus6);
+
+    const btnStim5Toggle = document.getElementById('btnStim5Toggle');
+    if (btnStim5Toggle) {
+      btnStim5Toggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleStimulus5('Toggle Button');
+      });
+    }
+
+    const btnStim6Toggle = document.getElementById('btnStim6Toggle');
+    if (btnStim6Toggle) {
+      btnStim6Toggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleStimulus6('Toggle Button');
+      });
+    }
+
+    // Keyboard Hotkey Interlocks for Ergonomic Clinical Testing
+    window.addEventListener('keydown', (e) => {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA')) {
+        return;
+      }
+      if (e.code === 'Space') {
+        e.preventDefault();
+        toggleStimulus5('Spacebar Hotkey');
+      } else if (e.key === 'm' || e.key === 'M' || e.key === '6') {
+        e.preventDefault();
+        toggleStimulus6('Hotkey ' + e.key);
+      } else if (e.key === '5') {
+        e.preventDefault();
+        toggleStimulus5('Hotkey 5');
+      } else if (e.key === 'Escape') {
+        // Emergency Disarm: Immediately pull both stimulus buttons out
+        if (stim5Pushed) setStimulus5(false, 'Escape Disarm');
+        if (stim6Pushed) setStimulus6(false, 'Escape Disarm');
+      }
+    });
+
     // Initialize display values and routing on startup
+    setStimulus5(false, 'Startup Init');
+    setStimulus6(false, 'Startup Init');
     updateRoutingDisplays();
     updateEncoderDisplay();
   </script>

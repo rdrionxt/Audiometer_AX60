@@ -61,11 +61,7 @@ __ALIGN_BEGIN static uint8_t USBD_Composite_CfgDesc[USB_COMPOSITE_CONFIG_DESC_SI
     USB_DESC_TYPE_CONFIGURATION,         /* bDescriptorType */
     LOBYTE(USB_COMPOSITE_CONFIG_DESC_SIZ),  /* wTotalLength L */
     HIBYTE(USB_COMPOSITE_CONFIG_DESC_SIZ),  /* wTotalLength H */
-#if CDC_ONLY_NO_MSC
-    0x02,                                /* bNumInterfaces  (CDC only) */
-#else
     0x03,                                /* bNumInterfaces  (CDC:2 + MSC:1) */
-#endif
     0x01,                                /* bConfigurationValue */
     0x00,                                /* iConfiguration */
     0xC0,                                /* bmAttributes: self-powered */
@@ -142,7 +138,6 @@ __ALIGN_BEGIN static uint8_t USBD_Composite_CfgDesc[USB_COMPOSITE_CONFIG_DESC_SI
     HIBYTE(CDC_DATA_FS_MAX_PACKET_SIZE),
     0x00,
 
-#if !CDC_ONLY_NO_MSC
     /* ── MSC Interface (9 bytes) ──────────────────────────────── */
     0x09,
     USB_DESC_TYPE_INTERFACE,
@@ -171,7 +166,6 @@ __ALIGN_BEGIN static uint8_t USBD_Composite_CfgDesc[USB_COMPOSITE_CONFIG_DESC_SI
     LOBYTE(MSC_MAX_FS_PACKET),
     HIBYTE(MSC_MAX_FS_PACKET),
     0x00,
-#endif /* !CDC_ONLY_NO_MSC */
 };
 
 /* ── Device Qualifier Descriptor ──────────────────────────────── */
@@ -191,13 +185,11 @@ static uint8_t COMPOSITE_Init(USBD_HandleTypeDef *pdev, uint8_t cfgidx)
 {
     UNUSED(cfgidx);
 
-#if !CDC_ONLY_NO_MSC
     /* ── Open MSC endpoints ──────────────────────────────────── */
     USBD_LL_OpenEP(pdev, MSC_EPIN_ADDR,  USBD_EP_TYPE_BULK, MSC_MAX_FS_PACKET);
     USBD_LL_OpenEP(pdev, MSC_EPOUT_ADDR, USBD_EP_TYPE_BULK, MSC_MAX_FS_PACKET);
     pdev->ep_in [MSC_EPIN_ADDR  & 0xFU].is_used = 1U;
     pdev->ep_out[MSC_EPOUT_ADDR & 0xFU].is_used = 1U;
-#endif
 
     /* ── Open CDC endpoints ──────────────────────────────────── */
     USBD_LL_OpenEP(pdev, CDC_IN_EP,  USBD_EP_TYPE_BULK, CDC_DATA_FS_MAX_PACKET_SIZE);
@@ -207,13 +199,11 @@ static uint8_t COMPOSITE_Init(USBD_HandleTypeDef *pdev, uint8_t cfgidx)
     pdev->ep_out[CDC_OUT_EP & 0xFU].is_used = 1U;
     pdev->ep_in [CDC_CMD_EP & 0xFU].is_used = 1U;
 
-#if !CDC_ONLY_NO_MSC
     /* ── Init MSC BOT state machine ──────────────────────────── */
     memset(&composite.msc, 0, sizeof(composite.msc));
     pdev->pClassData = &composite.msc;   /* MSC BOT functions use pClassData */
     pdev->pClassDataCmsit[0] = &composite.msc;
     MSC_BOT_Init(pdev);
-#endif
 
     /* ── Init CDC handle ─────────────────────────────────────── */
     memset(&composite.cdc, 0, sizeof(composite.cdc));
@@ -238,14 +228,12 @@ static uint8_t COMPOSITE_DeInit(USBD_HandleTypeDef *pdev, uint8_t cfgidx)
 {
     UNUSED(cfgidx);
 
-#if !CDC_ONLY_NO_MSC
     /* MSC */
     pdev->pClassData = &composite.msc;
     pdev->pClassDataCmsit[0] = &composite.msc;
     MSC_BOT_DeInit(pdev);
     USBD_LL_CloseEP(pdev, MSC_EPIN_ADDR);
     USBD_LL_CloseEP(pdev, MSC_EPOUT_ADDR);
-#endif
 
     /* CDC */
     USBD_LL_CloseEP(pdev, CDC_IN_EP);
@@ -273,7 +261,7 @@ static uint8_t COMPOSITE_Setup(USBD_HandleTypeDef *pdev, USBD_SetupReqTypedef *r
     {
         /* ── Class requests ──────────────────────────────────── */
         case USB_REQ_TYPE_CLASS:
-            if (!CDC_ONLY_NO_MSC && (wIndex_iface == 2U))          /* MSC interface */
+            if (wIndex_iface == 2U)          /* MSC interface */
             {
                 pdev->pClassData = &composite.msc;
                 pdev->pClassDataCmsit[0] = &composite.msc;
@@ -355,14 +343,12 @@ static uint8_t COMPOSITE_Setup(USBD_HandleTypeDef *pdev, USBD_SetupReqTypedef *r
                     break;
 
                 case USB_REQ_CLEAR_FEATURE:
-#if !CDC_ONLY_NO_MSC
                     if ((wIndex_iface == MSC_EPIN_ADDR) || (wIndex_iface == MSC_EPOUT_ADDR))
                     {
                         pdev->pClassData = &composite.msc;
                         pdev->pClassDataCmsit[0] = &composite.msc;
                         MSC_BOT_CplClrFeature(pdev, LOBYTE(req->wValue));
                     }
-#endif
                     break;
 
                 default:
@@ -398,16 +384,13 @@ static uint8_t COMPOSITE_EP0_RxReady(USBD_HandleTypeDef *pdev)
 /* ═══════════════════════════════════════════════════════════════ */
 static uint8_t COMPOSITE_DataIn(USBD_HandleTypeDef *pdev, uint8_t epnum)
 {
-#if !CDC_ONLY_NO_MSC
     if (epnum == (MSC_EPIN_ADDR & 0x7FU))       /* EP1 → MSC */
     {
         pdev->pClassData = &composite.msc;
         pdev->pClassDataCmsit[0] = &composite.msc;
         MSC_BOT_DataIn(pdev, epnum);
     }
-    else
-#endif
-    if (epnum == (CDC_IN_EP & 0x7FU))       /* EP2 → CDC TX done */
+    else if (epnum == (CDC_IN_EP & 0x7FU))       /* EP2 → CDC TX done */
     {
         composite.cdc.TxState = 0U;
         CDC_TransmitCplt_FS(composite.cdc.TxBuffer,
@@ -421,16 +404,13 @@ static uint8_t COMPOSITE_DataIn(USBD_HandleTypeDef *pdev, uint8_t epnum)
 /* ═══════════════════════════════════════════════════════════════ */
 static uint8_t COMPOSITE_DataOut(USBD_HandleTypeDef *pdev, uint8_t epnum)
 {
-#if !CDC_ONLY_NO_MSC
     if (epnum == MSC_EPOUT_ADDR)                 /* EP1 → MSC */
     {
         pdev->pClassData = &composite.msc;
         pdev->pClassDataCmsit[0] = &composite.msc;
         MSC_BOT_DataOut(pdev, epnum);
     }
-    else
-#endif
-    if (epnum == CDC_OUT_EP)                /* EP2 → CDC RX data */
+    else if (epnum == CDC_OUT_EP)                /* EP2 → CDC RX data */
     {
         uint32_t len = USBD_LL_GetRxDataSize(pdev, epnum);
         CDC_Receive_FS(composite.cdc.RxBuffer, &len);
